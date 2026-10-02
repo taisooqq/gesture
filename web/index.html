@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>제스처 슬라이드</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      background: #111;
+      color: #f4f4f4;
+      font-family: "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      padding: 16px 28px;
+      color: #9ad7a8;
+      font-size: 18px;
+    }
+    main {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+    }
+    h1 { font-size: 64px; margin: 0 0 12px; }
+    p { font-size: 28px; margin: 0; color: #ccc; }
+    footer { padding: 12px 28px 20px; color: #888; }
+    button {
+      margin-left: 8px;
+      background: #222;
+      color: #eee;
+      border: 1px solid #444;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div id="status">제스처: -</div>
+    <div>
+      <button id="prev" type="button">이전</button>
+      <button id="next" type="button">다음</button>
+    </div>
+  </header>
+  <main>
+    <div>
+      <h1 id="title"></h1>
+      <p id="body"></p>
+    </div>
+  </main>
+  <footer id="page"></footer>
+  <script>
+    const slides = [
+      { title: "비접촉 슬라이드", body: "주먹 = 다음, 보자기 = 이전" },
+      { title: "수집", body: "클래스당 사람별 50장 이상, 중앙 박스만 저장" },
+      { title: "특징", body: "피부색 분할 후 면적비, solidity, 결함 수, Hu" },
+      { title: "실시간", body: "확신도가 낮거나 잠깐 흔들리면 명령을 보내지 않음" },
+    ];
+    let index = 0;
+    let lastSeq = 0;
+
+    function render() {
+      document.getElementById("title").textContent = slides[index].title;
+      document.getElementById("body").textContent = slides[index].body;
+      document.getElementById("page").textContent = (index + 1) + " / " + slides.length;
+    }
+    function go(delta) {
+      index = (index + delta + slides.length) % slides.length;
+      render();
+    }
+
+    document.getElementById("next").onclick = () => go(1);
+    document.getElementById("prev").onclick = () => go(-1);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight") go(1);
+      if (e.key === "ArrowLeft") go(-1);
+    });
+
+    async function poll() {
+      try {
+        const res = await fetch("/api/state");
+        const state = await res.json();
+        const conf = Math.round((state.conf || 0) * 100);
+        document.getElementById("status").textContent =
+          "제스처: " + state.gesture + "  " + conf + "%  " + (state.fps || 0) + " fps";
+        if (state.seq !== lastSeq) {
+          lastSeq = state.seq;
+          if (state.action === "next") go(1);
+          if (state.action === "prev") go(-1);
+        }
+      } catch (err) {
+        document.getElementById("status").textContent = "서버 연결 대기";
+      }
+    }
+
+    render();
+    setInterval(poll, 200);
+  </script>
+</body>
+</html>

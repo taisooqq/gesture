@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gesture"
+version = "0.1.0"
+description = "웹캠 손 제스처로 슬라이드를 조작합니다."
+requires-python = ">=3.14"
+dependencies = [
+    "opencv-python",
+    "numpy",
+    "scikit-learn",
+    "joblib",
+]
+
+[project.scripts]
+gesture = "gesture.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
