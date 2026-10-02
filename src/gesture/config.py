@@ -29,10 +29,23 @@ class Settings:
         self.conf_threshold = 0.65
         self.min_hand_ratio = 0.03
         self.roi_scale = 0.55
-        self.web_port = 8765
         self.data_dir = self.root / "data"
+        self.video_dir = self.data_dir / "videos"
+        self.tags_path = self.data_dir / "tags.json"
+        self.video_max_width = 640
+        self.video_fps = 15
+        self.video_tags = (
+            ("pointer", "마우스포인터 움직임", "검지손가락의 방향"),
+            ("left_click", "마우스 좌클릭", "검지와 엄지가 맞닿음"),
+            ("right_click", "우클릭", "엄지와 중지가 맞닿음"),
+            ("back", "뒤로가기", "검지, 중지를 펴고 오른쪽에서 왼쪽으로"),
+            ("forward", "앞으로가기", "검지, 중지를 펴고 왼쪽에서 오른쪽으로"),
+            ("refresh", "새로고침", "검지를 돌림"),
+            ("drag", "드래그", "좌클릭을 유지"),
+            ("drop", "드롭", "손을 놓음"),
+            ("idle", "무동작", "주먹"),
+        )
         self.model_path = self.root / "models" / "gesture.joblib"
-        self.web_dir = self.root / "web"
 
 
 settings = Settings()

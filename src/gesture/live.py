@@ -8,37 +8,29 @@ import numpy as np
 
 from gesture.config import settings as default_settings
 from gesture.hand import HandAnalyzer
-from gesture.server import SlideServer
+from gesture.slides import SlideWindow
 from gesture.smoother import GestureSmoother
 
 
 class LiveDemo:
-    """프레임 → 손 특징 → 모델 → 스무딩 → 웹 명령."""
+    """프레임 → 손 특징 → 모델 → 스무딩 → 슬라이드 창."""
 
-    def __init__(self, camera=0, web_only=False, settings=None, analyzer=None):
+    def __init__(self, camera=0, ui_only=False, settings=None, analyzer=None):
         self.camera = camera
-        self.web_only = web_only
+        self.ui_only = ui_only
         self.settings = settings or default_settings
         self.analyzer = analyzer or HandAnalyzer(self.settings)
-        self.server = SlideServer(self.settings)
+        self.slides = SlideWindow(self.settings)
         self.smoother = GestureSmoother(self.settings)
         self.model = None
 
     def run(self):
-        self.server.start()
-        if self.web_only:
-            self._wait_web()
+        self.slides.start()
+        if self.ui_only:
+            self.slides.wait()
             return
         self.model = self._load_model()
         self._camera_loop()
-
-    def _wait_web(self):
-        print("웹만 실행 중. Ctrl+C 로 종료.")
-        try:
-            while True:
-                time.sleep(0.5)
-        except KeyboardInterrupt:
-            self.server.shutdown()
 
     def _load_model(self):
         path = self.settings.model_path
@@ -52,7 +44,7 @@ class LiveDemo:
     def _camera_loop(self):
         cap = cv2.VideoCapture(self.camera)
         if not cap.isOpened():
-            self.server.shutdown()
+            self.slides.shutdown()
             raise SystemExit("웹캠을 열 수 없습니다.")
 
         fps = 0.0
@@ -72,14 +64,16 @@ class LiveDemo:
         finally:
             cap.release()
             cv2.destroyAllWindows()
-            self.server.shutdown()
+            self.slides.shutdown()
 
     def _step(self, frame, fps):
         roi, (x, y, w, h) = self.analyzer.crop(frame)
         feat, mask = self.analyzer.extract(roi)
         label, conf, action, fired = self._predict(feat)
-        self.server.publish(label, conf, fps, action if fired else None)
+        self.slides.publish(label, conf, fps, action if fired else None)
         self._draw(frame, roi, mask, (x, y, w, h), label, conf, action if fired else "none", fps)
+        if self.slides.closed:
+            return False
         return (cv2.waitKey(1) & 0xFF) not in (ord("q"), 27)
 
     def _predict(self, feat):

@@ -9,6 +9,7 @@ Desktop.ini
 # Editors
 .idea/
 .vscode/
+.cursorrules
 *.swp
 *.swo
 *~
@@ -45,3 +46,4 @@ env/
 # Project
 models/*.joblib
 data/**/*.png
+data/**/*.avi

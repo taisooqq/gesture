@@ -12,6 +12,7 @@ dependencies = [
     "numpy",
     "scikit-learn",
     "joblib",
+    "PySide6",
 ]
 
 [project.scripts]
