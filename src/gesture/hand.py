@@ -26,8 +26,9 @@ class HandAnalyzer:
     def __init__(self, settings=None):
         self.settings = settings or default_settings
 
+    # 학습 영상 2. 가로·세로 약 55%의 정중앙만 남긴다.
+    # 손 위치를 따라가지 않는다. 얼굴이 파일과 인식에 들어가지 않게 하려는 고정 영역이다.
     def crop(self, frame):
-        """화면 중앙 박스. 얼굴이 들어가지 않게 손만 남깁니다."""
         h, w = frame.shape[:2]
         # 화면의 약 55%만 남긴다. 얼굴이 저장·인식에 들어가지 않게 하려는 영역이다.
         rw = int(w * self.settings.roi_scale)

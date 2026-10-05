@@ -380,6 +380,7 @@ class GestureWindow:
         self.model_tags = tags
         self.smoother = GestureSmoother(LabelSettings(tags, self.settings))
 
+    # 학습 영상 1. 태그가 있을 때만 녹화를 연다. 파일은 아직 만들지 않는다.
     def _start_record(self):
         if self.recorder.recording:
             return
@@ -391,6 +392,7 @@ class GestureWindow:
         self.stop_button.setEnabled(True)
         self.register_status.setText(f"녹화 중 · {self._title(self.tag)}")
 
+    # 학습 영상 5. 녹화를 닫고, 방금 파일은 선택한 태그의 목록에 붙인다.
     def _stop_record(self):
         if not self.recorder.recording:
             return
@@ -436,7 +438,13 @@ class GestureWindow:
         if self.tag:
             folder = self.settings.video_dir / self.tag
             if folder.exists():
-                paths = sorted(folder.glob("*.avi"))
+                paths = sorted(
+                    folder.glob("*.avi"),
+                    key=lambda path: (
+                        path.relative_to(self.settings.video_dir).as_posix() in trained,
+                        path.name,
+                    ),
+                )
         chosen_row = -1
         for path in paths:
             relative = path.relative_to(self.settings.video_dir).as_posix()
@@ -522,6 +530,8 @@ class GestureWindow:
             self._refresh_tag(self.tag)
         self.register_status.setText("영상을 삭제했습니다.")
 
+    # 학습 영상 2. 좌우를 뒤집은 화면에서 중앙만 자른다.
+    # 미리보기는 전체 화면에 박스를 그리고, 녹화 중이면 박스 안만 파일에 넣는다.
     def _show(self, frame):
         roi, box = self.analyzer.crop(frame)
         label, conf = self._predict(roi)

@@ -1,6 +1,7 @@
 """등록용 영상을 줄여서 태그 폴더에 저장합니다."""
 
 import time
+import uuid
 
 import cv2
 
@@ -20,11 +21,13 @@ class VideoRecorder:
         self.frames = 0
         self.recording = False
 
+    # 학습 영상 1. data/videos/태그/태그_a1b2c3.avi 처럼 짧은 임의 이름으로 경로만 잡는다.
+    # 번호를 쓰지 않는다. 다른 컴퓨터 영상을 합칠 때 이름이 겹치지 않게 하려는 것이다.
+    # 작성기는 첫 프레임이 들어올 때 연다.
     def start(self, tag):
         folder = self.settings.video_dir / tag
         folder.mkdir(parents=True, exist_ok=True)
-        index = self._next_index(folder, tag)
-        self.path = folder / f"{tag}_{index:04d}.avi"
+        self.path = self._new_path(folder, tag)
         self.writer = None
         self.size = None
         self.frames = 0
@@ -33,6 +36,8 @@ class VideoRecorder:
         self.recording = True
         self.tag = tag
 
+    # 학습 영상 3. 15fps보다 빠른 장은 버린다.
+    # 가로는 640 이하, 짝수 크기로 줄인 뒤 MJPG avi에 쓴다. 크기는 첫 장으로 고정한다.
     def write(self, frame):
         if not self.recording:
             return
@@ -57,6 +62,7 @@ class VideoRecorder:
         self.frames += 1
         self._last = now
 
+    # 학습 영상 4. 파일을 닫는다. 한 장도 없으면 빈 파일은 지운다.
     def stop(self):
         path = self.path
         frames = self.frames
@@ -76,18 +82,16 @@ class VideoRecorder:
             return 0.0
         return time.perf_counter() - self.started
 
-    def _next_index(self, folder, tag):
-        nums = []
-        for path in folder.glob(f"{tag}_*.avi"):
-            try:
-                nums.append(int(path.stem.rsplit("_", 1)[-1]))
-            except ValueError:
-                continue
-        return (max(nums) + 1) if nums else 1
+    def _new_path(self, folder, tag):
+        while True:
+            token = uuid.uuid4().hex[:6]
+            path = folder / f"{tag}_{token}.avi"
+            if not path.exists():
+                return path
 
 
+# 학습 영상 3. 가로가 640을 넘으면 비율을 유지해 줄이고, 가로·세로는 짝수로 맞춘다.
 def resize_max_width(frame, max_width):
-    """가로가 max_width를 넘지 않게 줄이고, 코덱용으로 짝수 크기로 맞춥니다."""
     height, width = frame.shape[:2]
     if width > max_width:
         scale = max_width / width
