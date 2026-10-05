@@ -4,6 +4,7 @@ import cv2
 
 from gesture.config import settings as default_settings
 from gesture.hand import HandAnalyzer
+from gesture.recorder import open_camera
 
 
 class DataCollector:
@@ -17,7 +18,7 @@ class DataCollector:
         self.selected = 0
 
     def run(self):
-        cap = cv2.VideoCapture(self.camera)
+        cap = open_camera(self.camera)
         if not cap.isOpened():
             raise SystemExit("웹캠을 열 수 없습니다.")
 

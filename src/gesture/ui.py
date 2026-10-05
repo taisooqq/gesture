@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 from gesture.config import settings as default_settings
 from gesture.hand import HandAnalyzer
 from gesture.model_store import LabelSettings, ModelStore
-from gesture.recorder import VideoRecorder
+from gesture.recorder import VideoRecorder, open_camera, open_video
 from gesture.smoother import GestureSmoother
 from gesture.tags import TagStore
 
@@ -410,7 +410,7 @@ class GestureWindow:
             self._reload_clips(select=path)
 
     def _open_camera(self):
-        self.cap = cv2.VideoCapture(self.camera_index)
+        self.cap = open_camera(self.camera_index)
         if not self.cap.isOpened():
             self.recognize_status.setText("웹캠을 열 수 없습니다.")
             self.register_status.setText("웹캠을 열 수 없습니다.")
@@ -474,7 +474,7 @@ class GestureWindow:
         if self.clip_path == path and self.clip_cap is not None:
             return
         self._close_clip()
-        cap = cv2.VideoCapture(str(path))
+        cap = open_video(path)
         if not cap.isOpened():
             self.register_status.setText("영상을 열 수 없습니다.")
             self._mark_selected()

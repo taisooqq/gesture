@@ -8,6 +8,7 @@ import numpy as np
 
 from gesture.config import settings as default_settings
 from gesture.hand import HandAnalyzer
+from gesture.recorder import open_camera
 from gesture.slides import SlideWindow
 from gesture.smoother import GestureSmoother
 
@@ -42,7 +43,7 @@ class LiveDemo:
         return blob["pipeline"]
 
     def _camera_loop(self):
-        cap = cv2.VideoCapture(self.camera)
+        cap = open_camera(self.camera)
         if not cap.isOpened():
             self.slides.shutdown()
             raise SystemExit("웹캠을 열 수 없습니다.")

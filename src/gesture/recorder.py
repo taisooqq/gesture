@@ -1,5 +1,6 @@
 """등록용 영상을 줄여서 태그 폴더에 저장합니다."""
 
+import sys
 import time
 import uuid
 
@@ -48,10 +49,7 @@ class VideoRecorder:
         height, width = image.shape[:2]
         if self.writer is None:
             self.size = (width, height)
-            fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-            self.writer = cv2.VideoWriter(
-                str(self.path), fourcc, self.settings.video_fps, self.size
-            )
+            self.writer = open_writer(self.path, self.settings.video_fps, self.size)
             if not self.writer.isOpened():
                 self.recording = False
                 self.writer = None
@@ -88,6 +86,36 @@ class VideoRecorder:
             path = folder / f"{tag}_{token}.avi"
             if not path.exists():
                 return path
+
+
+def open_camera(index):
+    """웹캠을 연다. 윈도우 기본 방식은 카메라를 못 여는 경우가 많아 DirectShow를 먼저 쓴다."""
+    if sys.platform == "win32":
+        cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        if cap.isOpened():
+            return cap
+        cap.release()
+    return cv2.VideoCapture(index)
+
+
+def open_video(path):
+    """저장 영상을 연다. 윈도우 기본 방식은 MJPG avi를 넘기며 읽지 못하는 경우가 있다."""
+    if sys.platform == "win32":
+        cap = cv2.VideoCapture(str(path), cv2.CAP_FFMPEG)
+        if cap.isOpened():
+            return cap
+        cap.release()
+    return cv2.VideoCapture(str(path))
+
+
+def open_writer(path, fps, size):
+    """MJPG avi 작성기. 맥과 윈도우가 같은 파일을 만들도록 OpenCV 자체 저장을 쓴다."""
+    fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+    writer = cv2.VideoWriter(str(path), cv2.CAP_OPENCV_MJPEG, fourcc, fps, size)
+    if writer.isOpened():
+        return writer
+    writer.release()
+    return cv2.VideoWriter(str(path), fourcc, fps, size)
 
 
 # 학습 영상 3. 가로가 640을 넘으면 비율을 유지해 줄이고, 가로·세로는 짝수로 맞춘다.

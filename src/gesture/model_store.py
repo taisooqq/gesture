@@ -13,6 +13,7 @@ from sklearn.preprocessing import StandardScaler
 
 from gesture.config import settings as default_settings
 from gesture.hand import HandAnalyzer
+from gesture.recorder import open_video
 
 
 class ModelStore:
@@ -168,7 +169,7 @@ class ModelStore:
 
 
 def _sample_frames(path, limit=20):
-    cap = cv2.VideoCapture(str(path))
+    cap = open_video(path)
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frames = []
     if total > 0:
