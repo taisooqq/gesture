@@ -3,47 +3,56 @@
     {
       "id": "pointer",
       "title": "마우스포인터 움직임",
-      "detail": "검지손가락의 방향"
+      "detail": "검지손가락의 방향",
+      "train": false
     },
     {
       "id": "left_click",
       "title": "마우스 좌클릭",
-      "detail": "검지와 엄지가 맞닿음"
+      "detail": "검지와 엄지가 맞닿음",
+      "train": true
     },
     {
       "id": "right_click",
       "title": "우클릭",
-      "detail": "엄지와 중지가 맞닿음"
+      "detail": "엄지와 중지가 맞닿음",
+      "train": true
     },
     {
       "id": "back",
       "title": "뒤로가기",
-      "detail": "검지, 중지를 펴고 오른쪽에서 왼쪽으로"
+      "detail": "검지, 중지를 펴고 오른쪽에서 왼쪽으로",
+      "train": true
     },
     {
       "id": "forward",
       "title": "앞으로가기",
-      "detail": "검지, 중지를 펴고 왼쪽에서 오른쪽으로"
+      "detail": "검지, 중지를 펴고 왼쪽에서 오른쪽으로",
+      "train": true
     },
     {
       "id": "refresh",
       "title": "새로고침",
-      "detail": "검지를 돌림"
+      "detail": "검지를 돌림",
+      "train": true
     },
     {
       "id": "drag",
       "title": "드래그",
-      "detail": "좌클릭을 유지"
+      "detail": "좌클릭을 유지",
+      "train": false
     },
     {
       "id": "drop",
       "title": "드롭",
-      "detail": "손을 놓음"
+      "detail": "손을 놓음",
+      "train": false
     },
     {
       "id": "idle",
       "title": "무동작",
-      "detail": "주먹"
+      "detail": "주먹",
+      "train": false
     }
   ]
 }

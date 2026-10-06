@@ -34,6 +34,7 @@ class Settings:
         self.tags_path = self.data_dir / "tags.json"
         self.video_max_width = 640
         self.video_fps = 15
+        self.train_tag_ids = ("left_click", "right_click", "back", "forward", "refresh")
         self.video_tags = (
             ("pointer", "마우스포인터 움직임", "검지손가락의 방향"),
             ("left_click", "마우스 좌클릭", "검지와 엄지가 맞닿음"),

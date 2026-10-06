@@ -14,6 +14,7 @@ from sklearn.preprocessing import StandardScaler
 from gesture.config import settings as default_settings
 from gesture.hand import HandAnalyzer
 from gesture.recorder import open_video
+from gesture.tags import TagStore
 
 
 class ModelStore:
@@ -77,14 +78,22 @@ class ModelStore:
         return self._save(pipeline, tags, videos, tag_counts)
 
     def _samples(self):
+        allowed = set(TagStore(self.settings).train_ids())
         folders = []
+        saw_video = False
         if self.settings.video_dir.exists():
             for folder in sorted(self.settings.video_dir.iterdir()):
-                if folder.is_dir():
-                    videos = sorted(folder.glob("*.avi"))
-                    if videos:
-                        folders.append((folder.name, videos))
+                if not folder.is_dir():
+                    continue
+                videos = sorted(folder.glob("*.avi"))
+                if not videos:
+                    continue
+                saw_video = True
+                if folder.name in allowed:
+                    folders.append((folder.name, videos))
         if not folders:
+            if saw_video:
+                raise RuntimeError("학습으로 지정된 태그에 영상이 없습니다.")
             return None
         tags = [name for name, _videos in folders]
         xs = []
@@ -187,14 +196,3 @@ def _sample_frames(path, limit=20):
             frames.append(frame)
     cap.release()
     return frames
-
-
-class LabelSettings:
-    """영상 태그 수에 맞춰 스무더가 읽을 이름 목록입니다."""
-
-    def __init__(self, tags, settings):
-        self.gestures = tuple(tags)
-        self.actions = {}
-        self.ema_alpha = settings.ema_alpha
-        self.hold_frames = settings.hold_frames
-        self.conf_threshold = settings.conf_threshold
