@@ -128,6 +128,130 @@ class HandAnalyzer:
                 count += 1
         return count
 
+    # 학습 샘플 1개. 연속된 약 1초 화면에서 손가락 거리와 검지 이동을 한 줄로 만든다.
+    # 순서는 엄지-검지 거리, 엄지-중지 거리, 검지 가로 이동, 검지 세로 이동, 검지 회전량이다.
+    MOTION_FEATURES = (
+        "thumb_index",
+        "thumb_middle",
+        "index_dx",
+        "index_dy",
+        "index_turn",
+    )
+
+    def window_features(self, frames):
+        """1초 묶음을 모델에 넣을 숫자 5개로 바꿉니다. 손이 거의 없으면 None입니다."""
+        points = [self._finger_points(frame) for frame in frames]
+        valid = [item for item in points if item is not None]
+        if len(valid) < max(3, len(frames) // 2):
+            return None
+        scale = float(np.median([item["scale"] for item in valid])) + 1e-6
+        thumb_index = min(np.linalg.norm(item["thumb"] - item["index"]) for item in valid) / scale
+        thumb_middle = min(np.linalg.norm(item["thumb"] - item["middle"]) for item in valid) / scale
+        index_path = [item["index"] / scale for item in valid]
+        delta = index_path[-1] - index_path[0]
+        return np.array(
+            [
+                thumb_index,
+                thumb_middle,
+                float(delta[0]),
+                float(delta[1]),
+                self._turn(index_path),
+            ],
+            dtype=np.float32,
+        )
+
+    def _finger_points(self, bgr):
+        """한 장에서 엄지, 검지, 중지 끝과 손 크기를 찾습니다. 손이 없으면 None입니다."""
+        contour = self._main_contour(bgr)
+        if contour is None:
+            return None
+        tips = self._fingertips(contour)
+        if len(tips) < 2:
+            return None
+        wrist = max(tips, key=lambda point: point[1])
+        # 화면 아래쪽에 있는 끝을 엄지로 본다. 나머지는 엄지에서 가까운 순서가 검지, 중지다.
+        others = [point for point in tips if not np.allclose(point, wrist)]
+        others.sort(key=lambda point: abs(point[0] - wrist[0]))
+        thumb = wrist
+        index = others[0]
+        middle = others[1] if len(others) > 1 else others[0]
+        _x, _y, _w, height = cv2.boundingRect(contour)
+        scale = max(float(height), 20.0)
+        return {
+            "thumb": thumb.astype(np.float32),
+            "index": index.astype(np.float32),
+            "middle": middle.astype(np.float32),
+            "scale": scale,
+        }
+
+    def _main_contour(self, bgr):
+        """피부색 덩어리 중 가장 큰 테두리를 손 윤곽으로 돌려줍니다."""
+        mask = self.skin_mask(bgr)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return None
+        contour = max(contours, key=cv2.contourArea)
+        h, w = mask.shape[:2]
+        if cv2.contourArea(contour) < float(h * w) * self.settings.min_hand_ratio:
+            return None
+        return contour
+
+    def _fingertips(self, contour):
+        """윤곽에서 서로 떨어진 손가락 끝 후보를 고릅니다."""
+        if len(contour) < 4:
+            return []
+        hull_idx = cv2.convexHull(contour, returnPoints=False)
+        if hull_idx is None or len(hull_idx) < 3:
+            return []
+        try:
+            defects = cv2.convexityDefects(contour, hull_idx)
+        except cv2.error:
+            defects = None
+        points = []
+        if defects is not None:
+            defects = np.asarray(defects)
+            if defects.ndim == 3:
+                defects = defects[:, 0, :]
+            for row in defects:
+                if float(row[3]) / 256.0 <= 12:
+                    continue
+                points.append(contour[int(row[0])][0])
+                points.append(contour[int(row[2])][0])
+        if not points:
+            hull = cv2.convexHull(contour)
+            points = [point[0] for point in hull]
+        tips = []
+        for point in points:
+            current = np.asarray(point, dtype=np.float32)
+            if any(np.linalg.norm(current - kept) < 20 for kept in tips):
+                continue
+            tips.append(current)
+        if len(tips) > 5:
+            center = np.mean(np.vstack(tips), axis=0)
+            tips.sort(key=lambda point: -np.linalg.norm(point - center))
+            tips = tips[:5]
+        return tips
+
+    def _turn(self, path):
+        """검지 경로가 중심 주변을 얼마나 돌았는지. 한 바퀴에 가깝면 값이 커집니다."""
+        if len(path) < 3:
+            return 0.0
+        # 손가락 끝이 한두 픽셀만 흔들린 구간은 회전으로 세지 않는다.
+        kept = [path[0]]
+        for point in path[1:]:
+            if np.linalg.norm(point - kept[-1]) >= 0.08:
+                kept.append(point)
+        if len(kept) < 3:
+            return 0.0
+        center = np.mean(np.vstack(kept), axis=0)
+        vectors = [point - center for point in kept]
+        total = 0.0
+        for prev, curr in zip(vectors, vectors[1:]):
+            cross = float(prev[0] * curr[1] - prev[1] * curr[0])
+            dot = float(prev[0] * curr[0] + prev[1] * curr[1])
+            total += float(np.arctan2(cross, dot))
+        return abs(total)
+
     def _hu3(self, contour):
         """4단계. 테두리 모양을 요약하는 형태값 3개."""
         # Hu 모멘트는 손이 화면 안에서 조금 움직이거나 돌아가도 크게 안 변한다.

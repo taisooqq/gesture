@@ -103,8 +103,9 @@ class ModelStore:
         for label, (name, videos) in enumerate(folders):
             for path in videos:
                 used = False
-                for frame in _sample_frames(path):
-                    feat, _mask = self.analyzer.extract(frame)
+                # 영상 한 장을 샘플로 넣지 않는다. 연속 1초를 숫자 한 줄로 넣어 이동이 남게 한다.
+                for window in _sample_windows(path):
+                    feat = self.analyzer.window_features(window)
                     if feat is None:
                         continue
                     xs.append(feat)
@@ -177,22 +178,19 @@ class ModelStore:
         self.catalog_path.write_text(text, encoding="utf-8")
 
 
-def _sample_frames(path, limit=20):
+# 학습 영상을 연속 1초 묶음으로 자른다. 15fps면 15장이 1초이고, 5장마다 다음 묶음을 만든다.
+def _sample_windows(path, length=15, stride=5):
     cap = open_video(path)
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frames = []
-    if total > 0:
-        indexes = np.linspace(0, max(total - 1, 0), num=min(limit, total), dtype=int)
-        for index in indexes:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, int(index))
-            ok, frame = cap.read()
-            if ok:
-                frames.append(frame)
-    else:
-        while len(frames) < limit:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            frames.append(frame)
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        frames.append(frame)
     cap.release()
-    return frames
+    if len(frames) < length:
+        if len(frames) >= 8:
+            yield frames
+        return
+    for start in range(0, len(frames) - length + 1, stride):
+        yield frames[start : start + length]

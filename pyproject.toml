@@ -8,8 +8,9 @@ version = "0.1.0"
 description = "웹캠 손 제스처로 슬라이드를 조작합니다."
 requires-python = ">=3.14"
 dependencies = [
-    "opencv-python",
-    "numpy",
+    "opencv-python>=4.8,<5",
+    "mediapipe==0.10.18",
+    "numpy>=1.26,<2",
     "scikit-learn",
     "joblib",
     "PySide6",

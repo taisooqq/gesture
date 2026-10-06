@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from gesture.config import settings as default_settings
 from gesture.hand import HandAnalyzer
+from gesture.hand_track import HandOverlay
 from gesture.model import ModelStore
 from gesture.recorder import VideoRecorder
 from gesture.smoother import GestureSmoother
@@ -37,6 +38,7 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         self.camera_index = camera
         self.settings = settings or default_settings
         self.analyzer = HandAnalyzer(self.settings)
+        self.hand_overlay = HandOverlay()
         self.smoother = GestureSmoother(self.settings)
         self.recorder = VideoRecorder(self.settings)
         self.tags_store = TagStore(self.settings)
@@ -224,4 +226,5 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         if self.cap is not None:
             self.cap.release()
             self.cap = None
+        self.hand_overlay.close()
         self._close_clip()

@@ -1,5 +1,6 @@
-opencv-python
-numpy
+opencv-python>=4.8,<5
+mediapipe==0.10.18
+numpy>=1.26,<2
 scikit-learn
 joblib
 PySide6

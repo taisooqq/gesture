@@ -45,5 +45,6 @@ env/
 
 # Project
 models/*.joblib
+models/*.task
 data/**/*.png
 data/**/*.avi
