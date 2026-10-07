@@ -26,39 +26,13 @@ class GestureTrainer:
         )
 
     def run(self):
-        samples = self._load()
-        if samples is None:
-            raise SystemExit("data/ 에 이미지가 없습니다. 먼저 python main.py collect 로 촬영하세요.")
-        x, y, groups = samples
-        self._report(y)
-        self._cross_validate(x, y, groups)
-        self.pipeline.fit(x, y)
-        self._save()
+        raise SystemExit("윤곽 숫자 학습은 뺐습니다. 창의 학습 버튼을 사용하세요.")
 
     def _load(self):
-        xs, ys, groups = [], [], []
-        for label, gesture in enumerate(self.settings.gestures):
-            folder = self.settings.data_dir / gesture
-            if not folder.exists():
-                continue
-            for path in sorted(folder.glob("*.png")):
-                person = path.stem.split("_", 1)[0]
-                image = self._read_bgr(path)
-                if image is None:
-                    continue
-                feat, _mask = self.analyzer.extract(image)
-                if feat is None:
-                    print("손 분할 실패, 건너뜀:", path)
-                    continue
-                xs.append(feat)
-                ys.append(label)
-                groups.append(person)
-        if not xs:
-            return None
-        return np.vstack(xs), np.array(ys), np.array(groups)
+        return None
 
     def _report(self, y):
-        print("샘플", len(y), "특징", self.analyzer.FEATURE_NAMES)
+        print("샘플", len(y))
         for label, gesture in enumerate(self.settings.gestures):
             print(f"  {gesture}: {(y == label).sum()}")
 

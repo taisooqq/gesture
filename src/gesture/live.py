@@ -30,8 +30,7 @@ class LiveDemo:
         if self.ui_only:
             self.slides.wait()
             return
-        self.model = self._load_model()
-        self._camera_loop()
+        raise SystemExit("윤곽 인식은 뺐습니다. python main.py 로 창을 여세요.")
 
     def _load_model(self):
         path = self.settings.model_path
@@ -68,14 +67,7 @@ class LiveDemo:
             self.slides.shutdown()
 
     def _step(self, frame, fps):
-        roi, (x, y, w, h) = self.analyzer.crop(frame)
-        feat, mask = self.analyzer.extract(roi)
-        label, conf, action, fired = self._predict(feat)
-        self.slides.publish(label, conf, fps, action if fired else None)
-        self._draw(frame, roi, mask, (x, y, w, h), label, conf, action if fired else "none", fps)
-        if self.slides.closed:
-            return False
-        return (cv2.waitKey(1) & 0xFF) not in (ord("q"), 27)
+        return False
 
     def _predict(self, feat):
         if feat is None or self.model is None:

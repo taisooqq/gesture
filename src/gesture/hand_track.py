@@ -1,6 +1,6 @@
 """캠 화면에 미디어파이프 손 좌표를 그립니다.
 
-예제의 mp.solutions.hands 를 그대로 씁니다.
+손 좌표는 예제의 mp.solutions.hands 를 그대로 씁니다.
 미디어파이프 1.0 에는 이 API가 없고, 0.10.18 에서 동작합니다.
 """
 
@@ -15,6 +15,7 @@ class HandOverlay:
         self._hands = None
         self._drawing = mp.solutions.drawing_utils
         self._hands_api = mp.solutions.hands
+
         self.error = None
 
     def close(self):
@@ -45,19 +46,13 @@ class HandOverlay:
         return view
 
     def _write_coordinates(self, view, hand_landmarks):
-        """관절 번호는 점 옆에, 픽셀 좌표는 화면 오른쪽에 적습니다."""
+        """관절 번호를 점 옆에 적습니다."""
         height, width = view.shape[:2]
-        scale = max(height / 1200, 1)
-        lines = []
+        scale = max(height / 1200, 3)
         for index, point in enumerate(hand_landmarks.landmark):
             x = min(max(int(point.x * width), 0), width - 1)
             y = min(max(int(point.y * height), 0), height - 1)
             self._text(view, str(index), (x + 6, y - 6), scale)
-            lines.append(f"{index:2d}  {x:4d},{y:4d}")
-        x0 = width - int(150 * scale)
-        y0 = int(22 * scale)
-        for row, line in enumerate(lines):
-            self._text(view, line, (x0, y0 + int(row * 18 * scale)), scale)
 
     def _text(self, view, text, origin, scale):
         font = cv2.FONT_HERSHEY_SIMPLEX

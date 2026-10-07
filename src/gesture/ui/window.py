@@ -31,6 +31,7 @@ from gesture.ui.shell import Shell
 from gesture.ui.tags import TagPane
 
 
+
 class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
     """인식 탭과 등록 탭을 PySide6 창으로 보여 줍니다."""
 
@@ -42,11 +43,12 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         self.smoother = GestureSmoother(self.settings)
         self.recorder = VideoRecorder(self.settings)
         self.tags_store = TagStore(self.settings)
-        self.model_store = ModelStore(self.settings, self.analyzer)
+        self.model_store: ModelStore = ModelStore(self.settings, self.analyzer)
         self.tags = []
         self.tag_rows = {}
         self.model = None
         self.model_tags = []
+        self.model_features = None
         self._apply_record(self.model_store.active())
         self.cap = None
         self.clip_cap = None
@@ -227,4 +229,5 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
             self.cap.release()
             self.cap = None
         self.hand_overlay.close()
+        self.analyzer.close()
         self._close_clip()

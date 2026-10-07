@@ -15,7 +15,7 @@
     {
       "id": "right_click",
       "title": "우클릭",
-      "detail": "엄지와 중지가 맞닿음",
+      "detail": "엄지와 나머지 손가락이 맞닿음",
       "train": true
     },
     {
@@ -34,7 +34,7 @@
       "id": "refresh",
       "title": "새로고침",
       "detail": "검지를 돌림",
-      "train": true
+      "train": false
     },
     {
       "id": "drag",
@@ -52,7 +52,7 @@
       "id": "idle",
       "title": "무동작",
       "detail": "주먹",
-      "train": false
+      "train": true
     }
   ]
 }

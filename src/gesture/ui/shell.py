@@ -1,13 +1,18 @@
 """창 닫기와 등록 탭 단축키."""
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QApplication, QWidget
+
+if TYPE_CHECKING:
+    from gesture.ui.window import GestureWindow
 
 
 class Shell(QWidget):
     """등록 탭에서 Space는 녹화, 방향키는 태그 이동입니다."""
 
-    def __init__(self, owner):
+    def __init__(self, owner: "GestureWindow"):
         super().__init__()
         self.owner = owner
         self.installEventFilter(self)

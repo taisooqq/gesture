@@ -1,30 +1,22 @@
-"""피부색으로 손을 찾고, 형태를 숫자 특징으로 바꿉니다."""
+"""중앙 영역을 자르고, 미디어파이프 관절을 학습 숫자로 바꿉니다."""
+
+from collections import OrderedDict
 
 import cv2
+import mediapipe as mp
 import numpy as np
 
 from gesture.config import settings as default_settings
 
 
 class HandAnalyzer:
-    """중앙 영역 자르기, 피부색 마스크, 형태 특징 추출."""
-
-    # 손 윤곽 하나에서 재는 숫자 8개의 이름.
-    # 작업 순서가 아니라, 한 장의 사진이 모델에 들어갈 때 늘어서는 순서다.
-    # [면적비, 가로세로비, solidity, 원형도, 손가락 골 개수, hu1, hu2, hu3]
-    FEATURE_NAMES = (
-        "area_ratio",
-        "aspect",
-        "solidity",
-        "circularity",
-        "defects",
-        "hu1",
-        "hu2",
-        "hu3",
-    )
+    """중앙 영역 자르기와 관절 숫자."""
 
     def __init__(self, settings=None):
         self.settings = settings or default_settings
+        self._hands = None
+        self.hands_error = None
+        self._point_cache = OrderedDict()
 
     # 학습 영상 2. 가로·세로 약 55%의 정중앙만 남긴다.
     # 손 위치를 따라가지 않는다. 얼굴이 파일과 인식에 들어가지 않게 하려는 고정 영역이다.
@@ -38,53 +30,28 @@ class HandAnalyzer:
         return frame[y1 : y1 + rh, x1 : x1 + rw].copy(), (x1, y1, rw, rh)
 
     def skin_mask(self, bgr):
-        """1·2단계. 자른 컬러 화면을 흑백 손 도장(마스크)으로 바꿉니다."""
-        # 1. 피부색만 흰색으로 남김.
-        # 한 점은 파랑·초록·빨강으로 저장돼 있다. 조명이 밝아지면 세 값이 같이 커져
-        # 피부인지 구분하기 어렵다. YCrCb는 밝기(Y)와 색(Cr, Cb)을 나눠 적는다.
-        # 피부는 밝기가 달라도 Cr, Cb가 비슷한 구간에 모인다.
-        # Y는 거의 제한하지 않고 Cr 133~173, Cb 77~127만 흰색으로 칠한다.
-        # 구간 밖은 검정이다. 컬러 사진은 사라지고 손 모양의 흑백 도장만 남는다.
+        """예전 모델용. 피부색만 남긴 흑백 손 도장을 만듭니다."""
         ycrcb = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)
         lower = np.array([0, 133, 77], dtype=np.uint8)
         upper = np.array([255, 173, 127], dtype=np.uint8)
         mask = cv2.inRange(ycrcb, lower, upper)
-        # 2. 작은 점은 지우고, 손 안의 구멍은 메운다.
-        # 벽의 작은 반사가 흰 점으로 남거나, 그림자가 손바닥에 검정 구멍을 만든다.
-        # 동그란 작은 지우개로 두 번 다듬는다.
-        # 열기: 지우개보다 작은 흰 점만 지운다. 손처럼 큰 덩어리는 남는다.
-        # 닫기: 손 안의 작은 검정 구멍을 흰색으로 채운다.
-        # 손가락 사이처럼 원래 뚫린 큰 틈까지 메우지는 않는다.
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
         return mask
 
     def extract(self, bgr):
-        """3·4단계. 도장 테두리를 손으로 보고, 그 테두리에서 숫자 8개를 잽니다."""
-        # 3. 흰색 덩어리의 테두리를 따라가 손으로 본다.
-        # 흰색과 검정이 만나는 경계의 좌표 목록이 윤곽이다.
-        # 덩어리가 여러 개면 넓이가 가장 큰 테두리를 쓴다.
-        # 그 넓이가 자른 화면의 3%보다 작으면 손이 없다고 보고 여기서 끝낸다.
+        """예전 모델용. 한 장의 윤곽에서 숫자 8개를 만듭니다. 손이 없으면 None입니다."""
         mask = self.skin_mask(bgr)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         h, w = mask.shape[:2]
         frame_area = float(h * w)
         if not contours:
             return None, mask
-
         contour = max(contours, key=cv2.contourArea)
         area = float(cv2.contourArea(contour))
         if area < frame_area * self.settings.min_hand_ratio:
             return None, mask
-
-        # 4. 그 테두리에서 숫자 8개를 계산한다. 모델은 나중에 이 한 줄만 본다.
-        # 면적: 테두리 안쪽 넓이를 자른 화면 전체로 나눈 비율.
-        # 가로·세로: 테두리를 감싼 직사각형의 가로를 세로로 나눈 값.
-        # 볼록 넓이: 테두리 바깥에 고무줄을 씌운 안쪽 넓이. 손가락 홈으로는 들어가지 않는다.
-        #   실제 면적 / 고무줄 안 넓이 = solidity. 주먹은 1에 가깝고 보자기는 더 작다.
-        # 둘레: 테두리를 한 바퀴 간 길이. 4*π*면적/둘레² 가 원형도이고 원은 1에 가깝다.
-        # 홈 개수와 형태값 3개는 아래 4번 보조 함수에서 구한다.
         _x, _y, bw, bh = cv2.boundingRect(contour)
         hull = cv2.convexHull(contour)
         hull_area = float(cv2.contourArea(hull)) + 1e-6
@@ -103,10 +70,7 @@ class HandAnalyzer:
         return feat, mask
 
     def _defect_count(self, contour):
-        """4단계. 손가락 사이처럼 깊게 들어간 홈의 개수."""
-        # 고무줄(볼록 껍질)과 실제 테두리 사이로 깊게 들어간 곳을 센다.
-        # 보자기는 손가락 사이에 홈이 여러 개이고, 주먹은 거의 없다.
-        # 얕은 울퉁불퉁함은 빼고 깊이가 18보다 큰 홈만 개수에 넣는다.
+        """윤곽에서 손가락 사이처럼 깊게 들어간 홈의 개수."""
         if len(contour) < 4:
             return 0
         hull_idx = cv2.convexHull(contour, returnPoints=False)
@@ -123,31 +87,106 @@ class HandAnalyzer:
             defects = defects[:, 0, :]
         count = 0
         for row in defects:
-            # depth는 고정소수라 256으로 나눈다. 얕은 굴곡은 손가락으로 세지 않는다.
             if float(row[3]) / 256.0 > 18:
                 count += 1
         return count
 
-    # 학습 샘플 1개. 연속된 약 1초 화면에서 손가락 거리와 검지 이동을 한 줄로 만든다.
-    # 순서는 엄지-검지 거리, 엄지-중지 거리, 검지 가로 이동, 검지 세로 이동, 검지 회전량이다.
-    MOTION_FEATURES = (
-        "thumb_index",
-        "thumb_middle",
-        "index_dx",
-        "index_dy",
-        "index_turn",
+    def _hu3(self, contour):
+        """윤곽 모양을 요약하는 형태값 3개."""
+        hu = cv2.HuMoments(cv2.moments(contour)).flatten()
+        return [
+            float(-np.sign(value) * np.log10(abs(value) + 1e-12))
+            for value in hu[:3]
+        ]
+
+    # 학습 숫자는 여기다. 인식은 camera.py _predict 가 features_for 로 같은 숫자를 만든다.
+    # 손목을 원점으로 두고, 다섯 손가락 끝만 쓴다. 엄지, 검지, 중지, 약지, 새끼 순이다.
+    # 끝마다 x, y, dx, dy. x, y는 손목을 뺀 위치, dx, dy는 1초 동안 그 끝이 손목 기준으로 움직인 양이다.
+    # 손 크기는 손목에서 중지 뿌리까지로 나눈다. z는 넣지 않는다.
+    FEATURE_KIND = "fingertips"
+    WINDOW_KINDS = ("fingertips", "mediapipe_joints", "mediapipe")
+    _TIP_NAMES = ("thumb", "index", "middle", "ring", "pinky")
+    _TIPS = (4, 8, 12, 16, 20)
+    MOTION_FEATURES = tuple(
+        f"{name}_{axis}"
+        for name in _TIP_NAMES
+        for axis in ("x", "y", "dx", "dy")
     )
+    LANDMARK_COUNT = 21
+    _WRIST = 0
+    _MIDDLE_MCP = 9
+
+    def close(self):
+        if self._hands is not None:
+            self._hands.close()
+            self._hands = None
 
     def window_features(self, frames):
-        """1초 묶음을 모델에 넣을 숫자 5개로 바꿉니다. 손이 거의 없으면 None입니다."""
+        """1초 묶음을 다섯 손가락 끝의 위치와 이동으로 바꿉니다. 손이 거의 없으면 None입니다."""
+        valid, scale = self._valid_frames(frames)
+        if valid is None:
+            return None
+        rows = []
+        for tip in self._TIPS:
+            # 손목을 뺀 끝 위치. 화면 어디에 손이 있는지는 빠진다.
+            placed = np.stack([(item["joints"][tip] - item["wrist"]) / scale for item in valid])
+            # 1초 중간의 위치와, 처음에서 끝까지의 이동.
+            rows.append(np.concatenate([np.median(placed, axis=0), placed[-1] - placed[0]]))
+        return np.concatenate(rows).astype(np.float32)
+
+    def _joint_features(self, frames):
+        """예전 모델용. 관절 21개의 위치와 화면 이동을 한 줄로 만듭니다."""
+        valid, scale = self._valid_frames(frames)
+        if valid is None:
+            return None
+        placed = [(item["joints"] - item["wrist"]) / scale for item in valid]
+        shape = np.median(np.stack(placed), axis=0)
+        motion = (valid[-1]["joints"] - valid[0]["joints"]) / scale
+        return np.concatenate([shape, motion], axis=1).reshape(-1).astype(np.float32)
+
+    def _valid_frames(self, frames):
+        """손이 잡힌 장면과 손 크기를 고릅니다. 너무 적으면 (None, None)입니다."""
+        points = [self._finger_points(frame) for frame in frames]
+        valid = [item for item in points if item is not None]
+        if len(valid) < max(3, len(frames) // 2):
+            return None, None
+        scale = float(np.median([item["scale"] for item in valid])) + 1e-6
+        return valid, scale
+
+    def features_for(self, frames, kind):
+        """고른 모델이 학습할 때 본 것과 같은 숫자 한 줄을 만듭니다."""
+        # 다섯 손가락 끝. 지금 학습 버튼이 만드는 모델이다.
+        if kind == self.FEATURE_KIND:
+            return self.window_features(frames)
+        # 관절 21개 전부.
+        if kind == "mediapipe_joints":
+            return self._joint_features(frames)
+        # 엄지·검지·중지 거리와 검지 이동 5개.
+        if kind == "mediapipe":
+            return self._summary_features(frames)
+        # 좌표 종류가 없는 예전 모델은 한 장의 윤곽 숫자 8개다.
+        if not frames:
+            return None
+        feat, _mask = self.extract(frames[-1])
+        return feat
+
+    def _summary_features(self, frames):
+        """1초 묶음을 손가락 거리 2개와 검지 이동 3개로 바꿉니다."""
         points = [self._finger_points(frame) for frame in frames]
         valid = [item for item in points if item is not None]
         if len(valid) < max(3, len(frames) // 2):
             return None
         scale = float(np.median([item["scale"] for item in valid])) + 1e-6
-        thumb_index = min(np.linalg.norm(item["thumb"] - item["index"]) for item in valid) / scale
-        thumb_middle = min(np.linalg.norm(item["thumb"] - item["middle"]) for item in valid) / scale
-        index_path = [item["index"] / scale for item in valid]
+        thumb = 4
+        index = 8
+        middle = 12
+        thumb_index = min(
+            np.linalg.norm(item["joints"][thumb] - item["joints"][index]) for item in valid
+        ) / scale
+        thumb_middle = min(
+            np.linalg.norm(item["joints"][thumb] - item["joints"][middle]) for item in valid
+        ) / scale
+        index_path = [(item["joints"][index] - item["wrist"]) / scale for item in valid]
         delta = index_path[-1] - index_path[0]
         return np.array(
             [
@@ -160,83 +199,10 @@ class HandAnalyzer:
             dtype=np.float32,
         )
 
-    def _finger_points(self, bgr):
-        """한 장에서 엄지, 검지, 중지 끝과 손 크기를 찾습니다. 손이 없으면 None입니다."""
-        contour = self._main_contour(bgr)
-        if contour is None:
-            return None
-        tips = self._fingertips(contour)
-        if len(tips) < 2:
-            return None
-        wrist = max(tips, key=lambda point: point[1])
-        # 화면 아래쪽에 있는 끝을 엄지로 본다. 나머지는 엄지에서 가까운 순서가 검지, 중지다.
-        others = [point for point in tips if not np.allclose(point, wrist)]
-        others.sort(key=lambda point: abs(point[0] - wrist[0]))
-        thumb = wrist
-        index = others[0]
-        middle = others[1] if len(others) > 1 else others[0]
-        _x, _y, _w, height = cv2.boundingRect(contour)
-        scale = max(float(height), 20.0)
-        return {
-            "thumb": thumb.astype(np.float32),
-            "index": index.astype(np.float32),
-            "middle": middle.astype(np.float32),
-            "scale": scale,
-        }
-
-    def _main_contour(self, bgr):
-        """피부색 덩어리 중 가장 큰 테두리를 손 윤곽으로 돌려줍니다."""
-        mask = self.skin_mask(bgr)
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        if not contours:
-            return None
-        contour = max(contours, key=cv2.contourArea)
-        h, w = mask.shape[:2]
-        if cv2.contourArea(contour) < float(h * w) * self.settings.min_hand_ratio:
-            return None
-        return contour
-
-    def _fingertips(self, contour):
-        """윤곽에서 서로 떨어진 손가락 끝 후보를 고릅니다."""
-        if len(contour) < 4:
-            return []
-        hull_idx = cv2.convexHull(contour, returnPoints=False)
-        if hull_idx is None or len(hull_idx) < 3:
-            return []
-        try:
-            defects = cv2.convexityDefects(contour, hull_idx)
-        except cv2.error:
-            defects = None
-        points = []
-        if defects is not None:
-            defects = np.asarray(defects)
-            if defects.ndim == 3:
-                defects = defects[:, 0, :]
-            for row in defects:
-                if float(row[3]) / 256.0 <= 12:
-                    continue
-                points.append(contour[int(row[0])][0])
-                points.append(contour[int(row[2])][0])
-        if not points:
-            hull = cv2.convexHull(contour)
-            points = [point[0] for point in hull]
-        tips = []
-        for point in points:
-            current = np.asarray(point, dtype=np.float32)
-            if any(np.linalg.norm(current - kept) < 20 for kept in tips):
-                continue
-            tips.append(current)
-        if len(tips) > 5:
-            center = np.mean(np.vstack(tips), axis=0)
-            tips.sort(key=lambda point: -np.linalg.norm(point - center))
-            tips = tips[:5]
-        return tips
-
     def _turn(self, path):
-        """검지 경로가 중심 주변을 얼마나 돌았는지. 한 바퀴에 가깝면 값이 커집니다."""
+        """검지 경로가 중심 주변을 얼마나 돌았는지."""
         if len(path) < 3:
             return 0.0
-        # 손가락 끝이 한두 픽셀만 흔들린 구간은 회전으로 세지 않는다.
         kept = [path[0]]
         for point in path[1:]:
             if np.linalg.norm(point - kept[-1]) >= 0.08:
@@ -252,12 +218,57 @@ class HandAnalyzer:
             total += float(np.arctan2(cross, dot))
         return abs(total)
 
-    def _hu3(self, contour):
-        """4단계. 테두리 모양을 요약하는 형태값 3개."""
-        # Hu 모멘트는 손이 화면 안에서 조금 움직이거나 돌아가도 크게 안 변한다.
-        # 7개 중 앞 3개만 쓰고, 숫자가 너무 작아서 로그로 크기를 맞춘다.
-        hu = cv2.HuMoments(cv2.moments(contour)).flatten()
-        return [
-            float(-np.sign(value) * np.log10(abs(value) + 1e-12))
-            for value in hu[:3]
-        ]
+    def _finger_points(self, bgr):
+        """한 장의 중앙 화면에서 관절 21개를 찾습니다. 손이 없으면 None입니다."""
+        key = self._frame_key(bgr)
+        if key in self._point_cache:
+            self._point_cache.move_to_end(key)
+            return self._point_cache[key]
+        points = self._read_landmarks(bgr)
+        self._point_cache[key] = points
+        if len(self._point_cache) > 256:
+            self._point_cache.popitem(last=False)
+        return points
+
+    def _frame_key(self, bgr):
+        """같은 화면을 묶음이 겹칠 때 다시 돌리지 않으려고, 배열과 내용으로 구분합니다."""
+        sample = np.ascontiguousarray(bgr[::16, ::16])
+        return (id(bgr), sample.shape, hash(sample.tobytes()))
+
+    def _read_landmarks(self, bgr):
+        """프레임마다 따로 관절을 찾습니다. 화면 비율 좌표이고, 픽셀 좌표는 쓰지 않습니다."""
+        hands = self._ensure_hands()
+        if hands is None:
+            return None
+        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        rgb.flags.writeable = False
+        results = hands.process(rgb)
+        if not results.multi_hand_landmarks:
+            return None
+        landmark = results.multi_hand_landmarks[0].landmark
+        # 화면 가로·세로에 대한 0~1 좌표. 픽셀 좌표와 z는 여기서 버린다.
+        joints = np.array([[point.x, point.y] for point in landmark], dtype=np.float32)
+        if len(joints) != self.LANDMARK_COUNT:
+            return None
+        wrist = joints[self._WRIST]
+        scale = float(np.linalg.norm(joints[self._MIDDLE_MCP] - wrist))
+        if scale < 1e-4:
+            return None
+        return {"joints": joints, "wrist": wrist, "scale": scale}
+
+    def _ensure_hands(self):
+        """추적 없이 한 장씩 찾습니다. 영상 파일이 바뀌어도 이전 손이 남지 않습니다."""
+        if self._hands is not None:
+            return self._hands
+        if self.hands_error:
+            return None
+        try:
+            self._hands = mp.solutions.hands.Hands(
+                static_image_mode=True,
+                max_num_hands=1,
+                min_detection_confidence=0.5,
+            )
+        except Exception as exc:
+            self.hands_error = f"손 좌표 모델을 열지 못했습니다. {exc}"
+            return None
+        return self._hands

@@ -10,11 +10,16 @@ from PySide6.QtWidgets import (
     QMessageBox,
 )
 
+from gesture.recorder import VideoRecorder
+from gesture.tags import TagStore
 from gesture.ui.tag_row import TagRow
 
 
 class TagPane:
     """선택한 태그와 태그 줄의 영상 개수를 다룹니다."""
+
+    tags_store: TagStore
+    recorder: VideoRecorder
 
     def _reload_tags(self, keep=None):
         self.tags = self.tags_store.load()

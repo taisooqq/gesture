@@ -4,11 +4,16 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QListWidgetItem
 
 from gesture.model.labels import LabelSettings
+from gesture.model.store import ModelStore
+from gesture.recorder import VideoRecorder
 from gesture.smoother import GestureSmoother
 
 
 class ModelPane:
     """학습 버튼을 누르고, 고른 모델을 인식에 적용합니다."""
+
+    model_store: ModelStore
+    recorder: VideoRecorder
 
     def _train(self):
         # 녹화 중이면 파일이 아직 닫히지 않았으므로 학습을 시작하지 않는다.
@@ -88,13 +93,16 @@ class ModelPane:
         if record is None:
             self.model = None
             self.model_tags = []
+            self.model_features = None
             self.smoother = GestureSmoother(self.settings)
             return
-        # 모델 파일에서 분류기와 그 모델이 배운 태그 순서를 읽는다.
-        pipeline, tags = self.model_store.load(record["id"])
+        # 모델 파일에서 분류기, 태그 순서, 좌표 종류를 읽는다.
+        pipeline, tags, features = self.model_store.load(record["id"])
         # 웹캠 판정이 이 분류기를 쓰게 한다.
         self.model = pipeline
         # 분류기 출력 순서를 태그 이름과 맞추기 위해 저장한다.
         self.model_tags = tags
+        # 이 모델이 학습할 때 쓴 숫자 종류. 인식이 같은 종류로 계산하게 한다.
+        self.model_features = features
         # 흔들린 판정을 거르는 기준을 이 태그의 개수에 맞춘다.
         self.smoother = GestureSmoother(LabelSettings(tags, self.settings))

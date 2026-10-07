@@ -6,11 +6,19 @@ from collections import deque
 import cv2
 import numpy as np
 
-from gesture.recorder import open_camera
+from gesture.hand import HandAnalyzer
+from gesture.hand_track import HandOverlay
+from gesture.recorder import VideoRecorder, open_camera
+from gesture.smoother import GestureSmoother
 
 
 class CameraPane:
     """인식 탭과 등록 탭이 같은 카메라 루프를 씁니다."""
+
+    analyzer: HandAnalyzer
+    hand_overlay: HandOverlay
+    recorder: VideoRecorder
+    smoother: GestureSmoother
 
     def _open_camera(self):
         self.cap = open_camera(self.camera_index)
@@ -66,7 +74,7 @@ class CameraPane:
             f"녹화 중 · {self._title(self.tag)} · {self.recorder.elapsed():.1f}초"
         )
 
-    # 인식. 최근 1초를 학습과 같은 숫자 5개로 바꿔 활성 모델에 넣는다.
+    # 인식. 고른 모델이 학습한 숫자 종류로 최근 화면을 바꿔 그 모델에 넣는다.
     def _predict(self, roi):
         self._predict_note = None
         if not hasattr(self, "_recent_rois"):
@@ -75,15 +83,20 @@ class CameraPane:
         self._recent_rois.append((now, roi))
         while self._recent_rois and now - self._recent_rois[0][0] > 1.0:
             self._recent_rois.popleft()
-        if self.model is None or now - self._recent_rois[0][0] < 0.8:
+        if self.model is None:
             self.smoother.reset()
             return "none", 0.0
-        feat = self.analyzer.window_features(self._even_frames(15))
+        kind = getattr(self, "model_features", None)
+        # 윤곽 숫자 8개 모델은 한 장만 본다. 관절 모델은 최근 1초가 모여야 한다.
+        single = kind not in HandAnalyzer.WINDOW_KINDS
+        if not single and now - self._recent_rois[0][0] < 0.8:
+            self.smoother.reset()
+            return "none", 0.0
+        frames = [roi] if single else self._even_frames(15)
+        feat = self.analyzer.features_for(frames, kind)
         expected = getattr(self.model, "n_features_in_", None)
         if feat is None or (expected is not None and feat.shape[-1] != expected):
             self.smoother.reset()
-            if feat is not None and expected is not None and feat.shape[-1] != expected:
-                self._predict_note = "제스처: 이전 모델입니다. 다시 학습하세요."
             return "none", 0.0
         proba = self.model.predict_proba(feat.reshape(1, -1))[0]
         ordered = np.zeros(len(self.model_tags), dtype=np.float64)

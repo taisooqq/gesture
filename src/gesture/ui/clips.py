@@ -7,11 +7,15 @@ import cv2
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QListWidgetItem, QMessageBox
 
-from gesture.recorder import open_video
+from gesture.model.store import ModelStore
+from gesture.recorder import VideoRecorder, open_video
 
 
 class ClipPane:
     """태그 폴더의 avi를 고르고, 찍힌 속도로 재생합니다."""
+
+    model_store: ModelStore
+    recorder: VideoRecorder
 
     def _toggle_record(self):
         if self.recorder.recording:
