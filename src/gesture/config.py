@@ -11,6 +11,7 @@ class Settings:
         self.gestures = ("fist", "palm", "scissors", "one", "thumb")
         self.gesture_ko = {
             "none": "손 없음",
+            "idle": "무동작",
             "fist": "주먹",
             "palm": "보",
             "scissors": "가위",
@@ -27,6 +28,14 @@ class Settings:
         self.ema_alpha = 0.35
         self.hold_frames = 8
         self.conf_threshold = 0.65
+        # 맞닿은 동안 유지하는 동작. 놓으면 무동작이고, 드래그는 좌클릭을 놓기 전이다.
+        self.hold_tags = ("left_click", "right_click")
+        # 손 크기(손목~중지 뿌리)로 나눈 끝 거리. 이보다 가까우면 잡고, 멀어지면 놓는다.
+        self.pinch_on = 0.42
+        self.pinch_off = 0.62
+        # 한 번 움직이는 동작은 최근 0.3초가 이보다 크게 움직일 때만 그 동작이다.
+        self.idle_seconds = 0.3
+        self.idle_motion = 0.12
         self.min_hand_ratio = 0.03
         self.roi_scale = 0.55
         self.data_dir = self.root / "data"

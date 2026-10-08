@@ -18,11 +18,10 @@ class HandAnalyzer:
         self.hands_error = None
         self._point_cache = OrderedDict()
 
-    # 학습 영상 2. 가로·세로 약 55%의 정중앙만 남긴다.
-    # 손 위치를 따라가지 않는다. 얼굴이 파일과 인식에 들어가지 않게 하려는 고정 영역이다.
+    # 등록 녹화만 가로·세로 약 55%의 정중앙을 남긴다. 인식은 화면 전체를 본다.
     def crop(self, frame):
         h, w = frame.shape[:2]
-        # 화면의 약 55%만 남긴다. 얼굴이 저장·인식에 들어가지 않게 하려는 영역이다.
+        # 화면의 약 55%만 남긴다. 얼굴이 녹화 파일에 들어가지 않게 하려는 영역이다.
         rw = int(w * self.settings.roi_scale)
         rh = int(h * self.settings.roi_scale)
         x1 = (w - rw) // 2
@@ -144,11 +143,49 @@ class HandAnalyzer:
         motion = (valid[-1]["joints"] - valid[0]["joints"]) / scale
         return np.concatenate([shape, motion], axis=1).reshape(-1).astype(np.float32)
 
+    def contacts(self, frame):
+        """지금 손가락 끝이 엄지와 얼마나 가까운지. 손이 없으면 None입니다.
+
+        무동작을 학습하지 않는다. 좌클릭은 엄지·검지, 우클릭은 엄지와 나머지 끝이다.
+        """
+        item = self._finger_points(frame)
+        if item is None:
+            return None
+        joints = item["joints"]
+        scale = float(item["scale"]) + 1e-6
+        thumb = joints[4]
+
+        def gap(index):
+            return float(np.linalg.norm(joints[index] - thumb) / scale)
+
+        return {
+            "left_click": gap(8),
+            "right_click": min(gap(12), gap(16), gap(20)),
+        }
+
+    def tip_motion(self, frames):
+        """손가락 끝이 손목 기준으로 움직인 거리. 손이 없으면 None, 한 장이면 0입니다."""
+        points = [self._finger_points(frame) for frame in frames]
+        valid = [item for item in points if item is not None]
+        if not valid:
+            return None
+        if len(valid) < 2:
+            return 0.0
+        scale = float(np.median([item["scale"] for item in valid])) + 1e-6
+        moved = 0.0
+        for tip in self._TIPS:
+            start = (valid[0]["joints"][tip] - valid[0]["wrist"]) / scale
+            end = (valid[-1]["joints"][tip] - valid[-1]["wrist"]) / scale
+            moved = max(moved, float(np.linalg.norm(end - start)))
+        return moved
+
     def _valid_frames(self, frames):
         """손이 잡힌 장면과 손 크기를 고릅니다. 너무 적으면 (None, None)입니다."""
         points = [self._finger_points(frame) for frame in frames]
         valid = [item for item in points if item is not None]
-        if len(valid) < max(3, len(frames) // 2):
+        # 1초가 안 되는 영상은 손이 한 장이라도 있으면 넣는다.
+        need = 1 if len(frames) < 8 else max(3, len(frames) // 2)
+        if len(valid) < need:
             return None, None
         scale = float(np.median([item["scale"] for item in valid])) + 1e-6
         return valid, scale
@@ -219,7 +256,7 @@ class HandAnalyzer:
         return abs(total)
 
     def _finger_points(self, bgr):
-        """한 장의 중앙 화면에서 관절 21개를 찾습니다. 손이 없으면 None입니다."""
+        """한 장에서 관절 21개를 찾습니다. 손이 없으면 None입니다."""
         key = self._frame_key(bgr)
         if key in self._point_cache:
             self._point_cache.move_to_end(key)

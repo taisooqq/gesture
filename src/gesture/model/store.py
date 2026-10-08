@@ -126,7 +126,7 @@ class ModelStore:
                 used = False
                 # 학습 입력은 hand.py 의 window_features 다.
                 # 1초 묶음마다 손목 기준 다섯 손가락 끝의 위치와 이동을 한 줄로 넣는다.
-                # 15장 묶음을 5장씩 밀며 자른다. 짧은 영상은 통째로 한 묶음이 되거나 버려진다.
+                # 15장 묶음을 5장씩 밀며 자른다. 1초보다 짧은 영상은 통째로 한 묶음이다.
                 for window in _sample_windows(path):
                     # 묶음 안 프레임의 절반 이상에서 손을 못 찾으면 None.
                     feat = self.analyzer.window_features(window)
@@ -238,7 +238,7 @@ def _sample_windows(path, length=15, stride=5):
         frames.append(frame)
     cap.release()
     if len(frames) < length:
-        if len(frames) >= 8:
+        if frames:
             yield frames
         return
     for start in range(0, len(frames) - length + 1, stride):
