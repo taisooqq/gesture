@@ -125,13 +125,82 @@ class HandAnalyzer:
         valid, scale = self._valid_frames(frames)
         if valid is None:
             return None
+        return self._tip_rows(valid, scale)
+
+    def augmented_features(self, frames):
+        """학습용. 원본 한 줄과, 같은 좌표를 돌리고 속도를 바꾸고 흔든 줄을 함께 만듭니다."""
+        valid, scale = self._valid_frames(frames)
+        if valid is None:
+            return []
+        rows = [self._tip_rows(valid, scale)]
+        for degrees in self.settings.augment_rotations:
+            rows.append(self._tip_rows(self._rotate_frames(valid, degrees), scale))
+        for speed in self.settings.augment_speeds:
+            warped = self._warp_frames(valid, speed)
+            rows.append(self._tip_rows(warped, self._frame_scale(warped)))
+        rng = np.random.default_rng(self._augment_seed(valid))
+        for _copy in range(self.settings.augment_jitter_copies):
+            shaken = self._jitter_frames(valid, scale, rng)
+            rows.append(self._tip_rows(shaken, self._frame_scale(shaken)))
+        return rows
+
+    def _tip_rows(self, valid, scale):
+        """손목 기준 다섯 손가락 끝의 중간 위치와 처음에서 끝까지의 이동."""
         rows = []
         for tip in self._TIPS:
-            # 손목을 뺀 끝 위치. 화면 어디에 손이 있는지는 빠진다.
             placed = np.stack([(item["joints"][tip] - item["wrist"]) / scale for item in valid])
-            # 1초 중간의 위치와, 처음에서 끝까지의 이동.
             rows.append(np.concatenate([np.median(placed, axis=0), placed[-1] - placed[0]]))
         return np.concatenate(rows).astype(np.float32)
+
+    def _rotate_frames(self, valid, degrees):
+        """손목을 중심으로 손 좌표를 돌립니다. 화면에서의 위치는 그대로입니다."""
+        theta = np.deg2rad(degrees)
+        cosine, sine = float(np.cos(theta)), float(np.sin(theta))
+        rotation = np.array([[cosine, sine], [-sine, cosine]], dtype=np.float32)
+        rotated = []
+        for item in valid:
+            joints = (item["joints"] - item["wrist"]) @ rotation + item["wrist"]
+            rotated.append({"joints": joints, "wrist": item["wrist"], "scale": item["scale"]})
+        return rotated
+
+    def _warp_frames(self, valid, speed):
+        """같은 동작을 더 빠르거나 느리게 한 좌표. 1보다 크면 일찍 끝나고 그 자세로 남습니다."""
+        count = len(valid)
+        if count < 2:
+            return valid
+        positions = np.clip(np.arange(count, dtype=np.float64) * float(speed), 0, count - 1)
+        warped = []
+        for position in positions:
+            left = int(np.floor(position))
+            right = min(left + 1, count - 1)
+            weight = float(position - left)
+            joints = ((1.0 - weight) * valid[left]["joints"] + weight * valid[right]["joints"]).astype(np.float32)
+            wrist = joints[self._WRIST]
+            scale = float(np.linalg.norm(joints[self._MIDDLE_MCP] - wrist))
+            if scale < 1e-4:
+                scale = float(valid[left]["scale"])
+            warped.append({"joints": joints, "wrist": wrist, "scale": scale})
+        return warped
+
+    def _jitter_frames(self, valid, scale, rng):
+        """관절 좌표에 손 크기 대비 작은 흔들림을 더합니다."""
+        sigma = float(self.settings.augment_jitter) * float(scale)
+        shaken = []
+        for item in valid:
+            joints = item["joints"] + rng.normal(0.0, sigma, size=item["joints"].shape).astype(np.float32)
+            wrist = joints[self._WRIST]
+            frame_scale = float(np.linalg.norm(joints[self._MIDDLE_MCP] - wrist))
+            if frame_scale < 1e-4:
+                frame_scale = float(item["scale"])
+            shaken.append({"joints": joints, "wrist": wrist, "scale": frame_scale})
+        return shaken
+
+    def _frame_scale(self, valid):
+        return float(np.median([item["scale"] for item in valid])) + 1e-6
+
+    def _augment_seed(self, valid):
+        tips = valid[0]["joints"][list(self._TIPS)] - valid[0]["wrist"]
+        return int(np.abs(tips).sum() * 1_000_000) % (2**32)
 
     def _joint_features(self, frames):
         """예전 모델용. 관절 21개의 위치와 화면 이동을 한 줄로 만듭니다."""

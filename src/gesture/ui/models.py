@@ -41,8 +41,9 @@ class ModelPane:
         # 영상 목록의 학습됨 표시를 방금 학습에 쓴 파일 기준으로 고친다.
         self._reload_clips(select=self.clip_path)
         # 저장된 모델 이름과 그 모델이 학습한 영상 개수를 보여 준다.
+        extra = " · 좌표 증강" if record.get("augmented") else ""
         self.register_status.setText(
-            f"{record['id']} 저장. 학습 영상 {record['video_count']}개"
+            f"{record['id']} 저장. 학습 영상 {record['video_count']}개{extra}"
         )
         # 다음 학습을 누를 수 있게 버튼을 다시 켠다.
         self.train_button.setEnabled(True)
@@ -59,7 +60,8 @@ class ModelPane:
         # 저장된 모델을 만든 순서대로 한 줄씩 넣는다.
         for record in self.model_store.list_models():
             # 보이는 글자는 모델 이름과 학습 영상 개수다.
-            item = QListWidgetItem(f"{record['id']}    영상 {record['video_count']}개")
+            extra = " · 증강" if record.get("augmented") else ""
+            item = QListWidgetItem(f"{record['id']}    영상 {record['video_count']}개{extra}")
             # 줄을 눌렀을 때 찾을 모델 이름을 줄 안에 숨겨 둔다.
             item.setData(Qt.UserRole, record["id"])
             # 마우스를 올리면 그 모델을 만든 시각이 나오게 한다.

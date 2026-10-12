@@ -8,6 +8,7 @@ import numpy as np
 
 from gesture.hand import HandAnalyzer
 from gesture.hand_track import HandOverlay
+from gesture import pointer
 from gesture.recorder import VideoRecorder, open_camera
 from gesture.smoother import GestureSmoother
 
@@ -41,13 +42,16 @@ class CameraPane:
     def _show(self, frame):
         roi, box = self.analyzer.crop(frame)
         label, conf = self._predict(frame)
+        self._control(label)
         if getattr(self, "_predict_note", None):
             text = self._predict_note
         elif self.model is None and label == "none":
             text = "제스처: 모델 없음"
         else:
             name = self.settings.gesture_ko.get(label, self._title(label))
-            if label in ("none", "idle"):
+            if getattr(self, "_control_note", None):
+                text = self._control_note
+            elif label in ("none", "idle"):
                 text = f"제스처: {name}"
             else:
                 text = f"제스처: {name}  {round(conf * 100)}%"
@@ -132,6 +136,34 @@ class CameraPane:
             if motion is not None and motion >= self.settings.idle_motion:
                 return label, conf
         return "idle", 0.0
+
+    def _control(self, label):
+        """인식 탭에서만, 동작이 새로 시작될 때 한 번 사이트에 보냅니다."""
+        if self.tabs.currentIndex() != 0:
+            pointer.left_up()
+            self._sent_label = None
+            return
+        if label in ("none", "idle"):
+            if getattr(self, "_sent_label", None) == "left_click":
+                pointer.left_up()
+            self._sent_label = label
+            self._control_note = None
+            return
+        if label == getattr(self, "_sent_label", None):
+            return
+        self._sent_label = label
+        if label == "left_click":
+            ok = pointer.left_down()
+        elif label == "right_click":
+            ok = pointer.right_click()
+        elif label in ("back", "forward", "refresh"):
+            ok = pointer.browser(label)
+        else:
+            return
+        if ok:
+            self._control_note = None
+        else:
+            self._control_note = "손쉬운 사용 권한이 필요합니다"
 
     def _frames_within(self, seconds):
         """최근 몇 초 안의 화면만 고릅니다."""

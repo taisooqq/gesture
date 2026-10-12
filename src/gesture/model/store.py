@@ -128,15 +128,14 @@ class ModelStore:
                 # 1초 묶음마다 손목 기준 다섯 손가락 끝의 위치와 이동을 한 줄로 넣는다.
                 # 15장 묶음을 5장씩 밀며 자른다. 1초보다 짧은 영상은 통째로 한 묶음이다.
                 for window in _sample_windows(path):
-                    # 묶음 안 프레임의 절반 이상에서 손을 못 찾으면 None.
-                    feat = self.analyzer.window_features(window)
-                    if feat is None:
-                        continue
-                    # 관절 21개의 (x, y, dx, dy) 를 한 줄로 편 벡터. 길이는 84.
-                    xs.append(feat)
-                    # 이 벡터의 정답은 지금 폴더의 클래스 번호다.
-                    ys.append(label)
-                    used = True
+                    # 원본 좌표 한 줄과, 각도·속도·흔들림을 바꾼 줄을 같은 태그로 넣는다.
+                    # 손이 거의 없으면 빈 목록이다. 모델 7까지는 이 과정이 없다.
+                    feats = self.analyzer.augmented_features(window)
+                    for feat in feats:
+                        xs.append(feat)
+                        ys.append(label)
+                    if feats:
+                        used = True
                 # 묶음이 하나도 안 남은 영상은 개수와 경로 목록에서 뺀다.
                 if used:
                     tag_counts[name] += 1
@@ -189,6 +188,7 @@ class ModelStore:
                 "video_count": len(videos),
                 "videos": videos,
                 "features": HandAnalyzer.FEATURE_KIND,
+                "augmented": True,
             },
             self.directory / filename,
         )
@@ -199,6 +199,7 @@ class ModelStore:
             "video_count": len(videos),
             "videos": videos,
             "tag_counts": tag_counts,
+            "augmented": True,
         }
         catalog["models"].append(record)
         catalog["active"] = model_id

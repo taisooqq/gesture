@@ -43,6 +43,11 @@ class Settings:
         self.tags_path = self.data_dir / "tags.json"
         self.video_max_width = 640
         self.video_fps = 15
+        # 모델 8부터 학습 좌표만 불린다. 위치와 크기는 이미 빠져 있어 각도, 속도, 흔들림만 넣는다.
+        self.augment_rotations = (-18, -9, 9, 18)
+        self.augment_speeds = (0.65, 1.4)
+        self.augment_jitter = 0.02
+        self.augment_jitter_copies = 2
         self.train_tag_ids = ("left_click", "right_click", "back", "forward", "refresh")
         self.video_tags = (
             ("pointer", "마우스포인터 움직임", "검지손가락의 방향"),
