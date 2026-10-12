@@ -38,11 +38,12 @@ class CameraPane:
                 self._show(cv2.flip(frame, 1))
         self._play_clip()
 
-    # 인식은 화면 전체를 본다. 중앙 박스는 등록 탭에서 녹화할 영역만 표시한다.
+    # 인식은 화면 전체를 본다. 중앙 초록 박스는 모니터 전체와 같은 비율이다.
     def _show(self, frame):
         roi, box = self.analyzer.crop(frame)
         label, conf = self._predict(frame)
         self._control(label)
+        self._aim(frame, box)
         if getattr(self, "_predict_note", None):
             text = self._predict_note
         elif self.model is None and label == "none":
@@ -60,10 +61,12 @@ class CameraPane:
         view = self.hand_overlay.draw(frame)
         if self.hand_overlay.error:
             self.register_status.setText(self.hand_overlay.error)
-        if self.tabs.currentIndex() != 0:
-            x, y, w, h = box
+        x, y, w, h = box
+        if self.tabs.currentIndex() == 0:
+            color = (60, 190, 80)
+        else:
             color = (40, 40, 220) if self.recorder.recording else (60, 190, 80)
-            cv2.rectangle(view, (x, y), (x + w, y + h), color, 2)
+        cv2.rectangle(view, (x, y), (x + w, y + h), color, 2)
         target = self.recognize_image if self.tabs.currentIndex() == 0 else self.register_image
         self._set_image(target, view)
 
@@ -163,6 +166,28 @@ class CameraPane:
         if ok:
             self._control_note = None
         else:
+            self._control_note = "손쉬운 사용 권한이 필요합니다"
+
+    def _aim(self, frame, box):
+        """초록 박스 안 검지 끝을 모니터의 같은 비율 위치로 옮깁니다. 클릭 중에는 그 자리에 둡니다."""
+        if self.tabs.currentIndex() != 0:
+            self._aim_at = None
+            return
+        if getattr(self, "_phase", None) in self.settings.hold_tags:
+            return
+        tip = self.analyzer.index_tip(frame)
+        if tip is None:
+            return
+        x, y, width, height = box
+        rel_x = min(1.0, max(0.0, (tip[0] - x) / width))
+        rel_y = min(1.0, max(0.0, (tip[1] - y) / height))
+        previous = getattr(self, "_aim_at", None)
+        if previous is not None:
+            weight = 0.65
+            rel_x = previous[0] + weight * (rel_x - previous[0])
+            rel_y = previous[1] + weight * (rel_y - previous[1])
+        self._aim_at = (rel_x, rel_y)
+        if not pointer.move_ratio(rel_x, rel_y):
             self._control_note = "손쉬운 사용 권한이 필요합니다"
 
     def _frames_within(self, seconds):

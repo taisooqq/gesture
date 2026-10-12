@@ -2,7 +2,7 @@
 
 import subprocess
 import threading
-from ctypes import CDLL, c_bool, c_double, c_int64, c_uint32, c_void_p, Structure
+from ctypes import CDLL, c_bool, c_double, c_int32, c_int64, c_uint32, c_void_p, Structure
 
 _core = CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
 _access = CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
@@ -26,6 +26,10 @@ class _Point(Structure):
     _fields_ = [("x", c_double), ("y", c_double)]
 
 
+class _Rect(Structure):
+    _fields_ = [("x", c_double), ("y", c_double), ("width", c_double), ("height", c_double)]
+
+
 _core.CGEventCreate.restype = c_void_p
 _core.CGEventCreate.argtypes = [c_void_p]
 _core.CGEventGetLocation.restype = _Point
@@ -36,6 +40,13 @@ _core.CGEventSetIntegerValueField.argtypes = [c_void_p, c_uint32, c_int64]
 _core.CGEventPost.argtypes = [c_uint32, c_void_p]
 _foundation.CFRelease.argtypes = [c_void_p]
 _access.AXIsProcessTrusted.restype = c_bool
+_core.CGMainDisplayID.restype = c_uint32
+_core.CGDisplayBounds.restype = _Rect
+_core.CGDisplayBounds.argtypes = [c_uint32]
+_core.CGWarpMouseCursorPosition.argtypes = [_Point]
+_core.CGWarpMouseCursorPosition.restype = c_int32
+_core.CGAssociateMouseAndMouseCursorPosition.argtypes = [c_bool]
+_core.CGAssociateMouseAndMouseCursorPosition.restype = c_int32
 
 
 def trusted():
@@ -46,6 +57,20 @@ def trusted():
 def cursor():
     point = _core.CGEventGetLocation(_core.CGEventCreate(None))
     return point.x, point.y
+
+
+def move_ratio(rel_x, rel_y):
+    """박스 안 비율을 메인 모니터의 같은 위치로 옮깁니다. 0, 0 이 왼쪽 위입니다."""
+    if not trusted():
+        return False
+    bounds = _core.CGDisplayBounds(_core.CGMainDisplayID())
+    point = _Point(
+        bounds.x + float(rel_x) * bounds.width,
+        bounds.y + float(rel_y) * bounds.height,
+    )
+    error = _core.CGWarpMouseCursorPosition(point)
+    _core.CGAssociateMouseAndMouseCursorPosition(True)
+    return error == 0
 
 
 def right_click():

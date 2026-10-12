@@ -212,6 +212,15 @@ class HandAnalyzer:
         motion = (valid[-1]["joints"] - valid[0]["joints"]) / scale
         return np.concatenate([shape, motion], axis=1).reshape(-1).astype(np.float32)
 
+    def index_tip(self, frame):
+        """검지 끝의 화면 픽셀 좌표. 손이 없으면 None입니다."""
+        item = self._finger_points(frame)
+        if item is None:
+            return None
+        height, width = frame.shape[:2]
+        tip = item["joints"][8]
+        return float(tip[0]) * width, float(tip[1]) * height
+
     def contacts(self, frame):
         """지금 손가락 끝이 엄지와 얼마나 가까운지. 손이 없으면 None입니다.
 
