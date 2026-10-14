@@ -8,7 +8,7 @@ import numpy as np
 
 from gesture.config import settings as default_settings
 from gesture.hand import HandAnalyzer
-from gesture.recorder import open_camera
+from gesture.recorder import open_camera, read_camera
 from gesture.slides import SlideWindow
 from gesture.smoother import GestureSmoother
 
@@ -51,7 +51,7 @@ class LiveDemo:
         prev = time.perf_counter()
         try:
             while True:
-                ok, frame = cap.read()
+                ok, frame = read_camera(cap, self.settings)
                 if not ok:
                     break
                 now = time.perf_counter()

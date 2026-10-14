@@ -88,14 +88,76 @@ class VideoRecorder:
                 return path
 
 
-def open_camera(index):
+def open_camera(index, settings=None):
     """웹캠을 연다. 윈도우 기본 방식은 카메라를 못 여는 경우가 많아 DirectShow를 먼저 쓴다."""
+    settings = settings or default_settings
     if sys.platform == "win32":
         cap = cv2.VideoCapture(index, cv2.CAP_DSHOW)
         if cap.isOpened():
+            _select_aspect(cap, settings)
             return cap
         cap.release()
-    return cv2.VideoCapture(index)
+    cap = cv2.VideoCapture(index)
+    if cap.isOpened():
+        _select_aspect(cap, settings)
+    return cap
+
+
+def read_camera(cap, settings=None):
+    """한 장을 읽고, 설정한 화면 비율이 아니면 가운데를 잘라 맞춥니다."""
+    ok, frame = cap.read()
+    if not ok or frame is None:
+        return False, None
+    return True, fit_aspect(frame, settings)
+
+
+def fit_aspect(frame, settings=None):
+    """가로·세로가 camera_aspect 가 아니면 가운데를 잘라 그 비율로 맞춥니다."""
+    settings = settings or default_settings
+    height, width = frame.shape[:2]
+    if height <= 0 or width <= 0:
+        return frame
+    target = settings.camera_aspect_w / settings.camera_aspect_h
+    if abs(width / height - target) <= 0.01:
+        return frame
+    if width / height > target:
+        new_w = int(height * target)
+        new_w -= new_w % 2
+        new_w = max(new_w, 2)
+        x = max(0, (width - new_w) // 2)
+        return frame[:, x : x + new_w]
+    new_h = int(width / target)
+    new_h -= new_h % 2
+    new_h = max(new_h, 2)
+    y = max(0, (height - new_h) // 2)
+    return frame[y : y + new_h, :]
+
+
+def _select_aspect(cap, settings):
+    """이미 16:9면 해상도를 바꾸지 않습니다. 아니면 16:9 크기부터 요청합니다."""
+    width, height = _camera_size(cap)
+    target = settings.camera_aspect_w / settings.camera_aspect_h
+    if _matches_aspect(width, height, target):
+        return
+    for ask_w, ask_h in settings.camera_sizes:
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, ask_w)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, ask_h)
+        width, height = _camera_size(cap)
+        if _matches_aspect(width, height, target):
+            return
+
+
+def _camera_size(cap):
+    ok, frame = cap.read()
+    if ok and frame is not None:
+        return frame.shape[1], frame.shape[0]
+    return int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+
+def _matches_aspect(width, height, target):
+    if width <= 0 or height <= 0:
+        return False
+    return abs(width / height - target) <= 0.01
 
 
 def open_video(path):

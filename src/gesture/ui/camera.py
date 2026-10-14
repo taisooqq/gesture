@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QListWidgetItem
 from gesture.hand import HandAnalyzer
 from gesture.hand_track import HandOverlay
 from gesture import pointer
-from gesture.recorder import VideoRecorder, open_camera
+from gesture.recorder import VideoRecorder, open_camera, read_camera
 from gesture.smoother import GestureSmoother
 
 
@@ -34,7 +34,7 @@ class CameraPane:
         if self._closing:
             return
         if self.cap is not None:
-            ok, frame = self.cap.read()
+            ok, frame = read_camera(self.cap, self.settings)
             if ok:
                 self._show(cv2.flip(frame, 1))
         self._play_clip()

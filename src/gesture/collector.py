@@ -4,7 +4,7 @@ import cv2
 
 from gesture.config import settings as default_settings
 from gesture.hand import HandAnalyzer
-from gesture.recorder import open_camera
+from gesture.recorder import open_camera, read_camera
 
 
 class DataCollector:
@@ -27,7 +27,7 @@ class DataCollector:
         print("키 1~5로 클래스, Space 저장, Q 종료")
         try:
             while True:
-                ok, frame = cap.read()
+                ok, frame = read_camera(cap, self.settings)
                 if not ok:
                     break
                 if not self._step(cv2.flip(frame, 1), counts):

@@ -66,6 +66,11 @@ class Settings:
         self.tags_path = self.data_dir / "tags.json"
         self.video_max_width = 640
         self.video_fps = 15
+        # 카메라 화면 비율. 가로 1과 세로 1의 길이가 달라지면 손 좌표가 찌그러진다.
+        self.camera_aspect_w = 16
+        self.camera_aspect_h = 9
+        # 이미 16:9가 아니면 앞에서부터 요청한다. 맥 FaceTime은 1920×1080이라 그대로 둔다.
+        self.camera_sizes = ((1920, 1080), (1280, 720))
         # 모델 8부터 학습 좌표만 불린다. 위치와 크기는 이미 빠져 있어 각도, 속도, 흔들림만 넣는다.
         self.augment_rotations = (-18, -9, 9, 18)
         self.augment_speeds = (0.65, 1.4)
