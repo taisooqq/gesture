@@ -3,6 +3,17 @@
 from pathlib import Path
 
 
+def clamp_threshold(value, default=0.65):
+    """인식 점수를 0.01~0.99로 맞춥니다. 1이면 거의 통과하지 않습니다."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number != number:
+        return default
+    return min(0.99, max(0.01, number))
+
+
 class Settings:
     """프로젝트 전역 설정. 제스처나 명령을 바꿀 때는 이 클래스만 수정합니다."""
 
@@ -27,17 +38,29 @@ class Settings:
         }
         self.ema_alpha = 0.35
         self.hold_frames = 8
+        # 태그에 점수가 없을 때 쓰는 기본값. 동작마다 다른 점수는 태그 threshold 다.
         self.conf_threshold = 0.65
-        # 맞닿은 동안 유지하는 동작. 놓으면 무동작이고, 드래그는 좌클릭을 놓기 전이다.
-        self.hold_tags = ("left_click", "right_click")
+        # 맞닿은 동안 유지하는 동작. 우클릭은 모델 판정만 쓰고, 드래그는 좌클릭을 놓기 전이다.
+        self.hold_tags = ("left_click",)
         # 손 크기(손목~중지 뿌리)로 나눈 끝 거리. 이보다 가까우면 잡고, 멀어지면 놓는다.
         self.pinch_on = 0.42
         self.pinch_off = 0.62
+        # 좌클릭 중 가장 붙었던 거리보다 이만큼 벌어지면 손을 뗀 것으로 본다.
+        # 중지 10번은 떼어도 0.62보다 가까운 경우가 많아서, 절대 거리만으로는 클릭이 안 끝난다.
+        self.pinch_release = 0.2
         # 한 번 움직이는 동작은 최근 0.3초가 이보다 크게 움직일 때만 그 동작이다.
         self.idle_seconds = 0.3
         self.idle_motion = 0.12
+        # 같은 제스처가 무동작으로 깜빡여도, 이 시간 동안 쉬기 전에는 다시 실행하지 않는다.
+        self.refire_seconds = 0.45
+        # 시연용. 오른손. 뒤로가기는 중지 끝 x가 이 값 이하, 앞으로가기는 이 값 이상일 때만 나간다.
+        self.dorsum_x = -1.0
+        self.palm_x = 1.0
         self.min_hand_ratio = 0.03
+        # 등록 녹화만 이 비율의 정중앙을 남긴다. 얼굴이 영상에 들어가지 않게 하려는 영역이다.
         self.roi_scale = 0.55
+        # 인식 탭의 초록 박스. 이 안 검지 끝이 모니터 전체다.
+        self.pointer_scale = 0.8
         self.data_dir = self.root / "data"
         self.video_dir = self.data_dir / "videos"
         self.tags_path = self.data_dir / "tags.json"

@@ -99,12 +99,12 @@ class ModelPane:
             self.smoother = GestureSmoother(self.settings)
             return
         # 모델 파일에서 분류기, 태그 순서, 좌표 종류를 읽는다.
-        pipeline, tags, features = self.model_store.load(record["id"])
+        pipeline, tags, features, thresholds = self.model_store.load(record["id"])
         # 웹캠 판정이 이 분류기를 쓰게 한다.
         self.model = pipeline
         # 분류기 출력 순서를 태그 이름과 맞추기 위해 저장한다.
         self.model_tags = tags
         # 이 모델이 학습할 때 쓴 숫자 종류. 인식이 같은 종류로 계산하게 한다.
         self.model_features = features
-        # 흔들린 판정을 거르는 기준을 이 태그의 개수에 맞춘다.
-        self.smoother = GestureSmoother(LabelSettings(tags, self.settings))
+        # 흔들린 판정을 거르는 기준을 이 태그의 개수와, 학습 때 저장한 점수에 맞춘다.
+        self.smoother = GestureSmoother(LabelSettings(tags, self.settings, thresholds))

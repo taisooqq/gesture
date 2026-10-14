@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QSpinBox,
 )
 
 from gesture.recorder import VideoRecorder
@@ -79,7 +80,7 @@ class TagPane:
         if hasattr(self, "delete_clip_button"):
             self.delete_clip_button.setEnabled(self.clip_path is not None and not busy)
 
-    def _ask_tag(self, title, name="", detail="", train=False):
+    def _ask_tag(self, title, name="", detail="", train=False, threshold=None):
         dialog = QDialog(self.window)
         dialog.setWindowTitle(title)
         dialog.setMinimumWidth(360)
@@ -88,9 +89,17 @@ class TagPane:
         detail_edit = QLineEdit(detail)
         train_box = QCheckBox("학습에 사용")
         train_box.setChecked(train)
+        score = QSpinBox()
+        score.setRange(1, 99)
+        score.setSuffix("%")
+        if threshold is None:
+            threshold = self.settings.conf_threshold
+        score.setValue(round(float(threshold) * 100))
+        score.setToolTip("이 점수 이상일 때만 이 동작으로 봅니다. 다음 학습부터 적용됩니다.")
         form.addRow("이름", name_edit)
         form.addRow("설명", detail_edit)
         form.addRow("학습", train_box)
+        form.addRow("인식 점수", score)
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("저장")
         buttons.button(QDialogButtonBox.Cancel).setText("취소")
@@ -103,7 +112,7 @@ class TagPane:
         if not name:
             self.register_status.setText("이름을 입력하세요.")
             return None
-        return name, detail_edit.text().strip(), train_box.isChecked()
+        return name, detail_edit.text().strip(), train_box.isChecked(), score.value() / 100
 
     def _add_tag(self):
         if self.recorder.recording:
@@ -111,8 +120,8 @@ class TagPane:
         result = self._ask_tag("태그 추가")
         if result is None:
             return
-        name, detail, train = result
-        tag = self.tags_store.add(name, detail, train)
+        name, detail, train, threshold = result
+        tag = self.tags_store.add(name, detail, train, threshold)
         self._reload_tags(keep=tag["id"])
         self.register_status.setText(f"태그를 추가했습니다. {name}")
 
@@ -120,11 +129,17 @@ class TagPane:
         if self.recorder.recording or not self.tag:
             return
         current = next(item for item in self.tags if item["id"] == self.tag)
-        result = self._ask_tag("태그 수정", current["title"], current["detail"], current.get("train", False))
+        result = self._ask_tag(
+            "태그 수정",
+            current["title"],
+            current["detail"],
+            current.get("train", False),
+            current.get("threshold", self.settings.conf_threshold),
+        )
         if result is None:
             return
-        name, detail, train = result
-        self.tags_store.update(self.tag, name, detail, train)
+        name, detail, train, threshold = result
+        self.tags_store.update(self.tag, name, detail, train, threshold)
         self._reload_tags(keep=self.tag)
         self.register_status.setText(f"태그를 수정했습니다. {name}")
 

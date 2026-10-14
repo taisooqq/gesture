@@ -61,6 +61,8 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         self.timer = None
         self._closing = False
         self.tag = None
+        self._compact = False
+        self._saved_geometry = None
 
     def run(self):
         self.app = QApplication.instance() or QApplication([])
@@ -93,11 +95,31 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         root.setContentsMargins(12, 12, 12, 12)
         root.addWidget(tabs)
 
-        recognize_layout = QVBoxLayout(recognize)
+        recognize_layout = QHBoxLayout(recognize)
+        left = QVBoxLayout()
+        self.live_button = QPushButton("실제 동작")
+        self.live_button.setCheckable(True)
+        self.live_button.setStyleSheet(
+            "QPushButton:checked { background: #2f8f4e; color: white; }"
+        )
+        self.live_button.toggled.connect(self._toggle_live)
         self.recognize_image = self._video_label()
         self.recognize_status = QLabel("제스처: -")
-        recognize_layout.addWidget(self.recognize_image, 1)
-        recognize_layout.addWidget(self.recognize_status)
+        left.addWidget(self.live_button)
+        left.addWidget(self.recognize_image, 1)
+        left.addWidget(self.recognize_status)
+
+        log_panel = QWidget()
+        log_panel.setFixedWidth(230)
+        log_layout = QVBoxLayout(log_panel)
+        log_layout.setContentsMargins(8, 0, 0, 0)
+        log_header = QLabel("동작 기록")
+        log_header.setStyleSheet("font-size: 15px; font-weight: 600;")
+        self.gesture_log = QListWidget()
+        log_layout.addWidget(log_header)
+        log_layout.addWidget(self.gesture_log, 1)
+        recognize_layout.addLayout(left, 1)
+        recognize_layout.addWidget(log_panel)
 
         register_layout = QHBoxLayout(register)
 
@@ -187,10 +209,59 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         register_layout.addLayout(center, 1)
         register_layout.addWidget(side)
         tabs.setCurrentIndex(1)
+        tabs.currentChanged.connect(self._on_tab_changed)
         self.register_status.setText(
             "Space로 녹화와 저장을 전환합니다. 방향키로 태그를 이동합니다."
         )
         self._reload_models()
+
+    def _toggle_live(self, checked):
+        """실제 동작이 켜지면 창을 작게 줄여 화면 맨 위에 고정합니다."""
+        self.live_button.setText("실제 동작 켜짐" if checked else "실제 동작")
+        if not checked:
+            pointer.left_up()
+            self._leave_compact()
+            return
+        if self.tabs.currentIndex() == 0:
+            self._enter_compact()
+
+    def _on_tab_changed(self, index):
+        if not self.live_button.isChecked():
+            return
+        if index == 0:
+            self._enter_compact()
+        else:
+            self._leave_compact()
+
+    def _enter_compact(self):
+        if self._compact:
+            return
+        self._compact = True
+        self._saved_geometry = self.window.geometry()
+        self._saved_min_size = self.window.minimumSize()
+        self._saved_image_min = self.recognize_image.minimumHeight()
+        self.recognize_image.setMinimumHeight(120)
+        self.window.setMinimumSize(640, 240)
+        self.window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        screen = self.window.screen().availableGeometry()
+        width = min(760, screen.width() - 24)
+        height = 280
+        x = screen.x() + max(0, (screen.width() - width) // 2)
+        y = screen.y() + 8
+        self.window.show()
+        self.window.setGeometry(x, y, width, height)
+        self.window.raise_()
+
+    def _leave_compact(self):
+        if not self._compact:
+            return
+        self._compact = False
+        self.window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
+        self.recognize_image.setMinimumHeight(self._saved_image_min)
+        self.window.setMinimumSize(self._saved_min_size)
+        self.window.show()
+        if self._saved_geometry is not None:
+            self.window.setGeometry(self._saved_geometry)
 
     def _video_label(self, min_height=420):
         label = QLabel()
@@ -222,6 +293,7 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         if self._closing:
             return
         self._closing = True
+        pointer.release_cursor()
         if self.timer is not None:
             self.timer.stop()
         if self.recorder.recording:

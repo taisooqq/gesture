@@ -3,6 +3,7 @@
 import json
 import re
 
+from gesture.config import clamp_threshold
 from gesture.config import settings as default_settings
 
 
@@ -21,6 +22,7 @@ class TagStore:
                     "title": title,
                     "detail": detail,
                     "train": tag_id in self.settings.train_tag_ids,
+                    "threshold": self.settings.conf_threshold,
                 }
                 for tag_id, title, detail in self.settings.video_tags
             ]
@@ -42,7 +44,18 @@ class TagStore:
             else:
                 train = tag_id in self.settings.train_tag_ids
                 changed = True
-            tags.append({"id": tag_id, "title": title, "detail": detail, "train": train})
+            threshold = clamp_threshold(item.get("threshold", self.settings.conf_threshold))
+            if item.get("threshold") != threshold:
+                changed = True
+            tags.append(
+                {
+                    "id": tag_id,
+                    "title": title,
+                    "detail": detail,
+                    "train": train,
+                    "threshold": threshold,
+                }
+            )
         if changed:
             self.save(tags)
         return tags
@@ -55,27 +68,34 @@ class TagStore:
     def train_ids(self):
         return [tag["id"] for tag in self.load() if tag.get("train")]
 
-    def add(self, title, detail, train=False):
+    def add(self, title, detail, train=False, threshold=None):
         tags = self.load()
         tag = {
             "id": self._new_id(tags),
             "title": title.strip(),
             "detail": detail.strip(),
             "train": bool(train),
+            "threshold": self._threshold(threshold),
         }
         tags.append(tag)
         self.save(tags)
         return tag
 
-    def update(self, tag_id, title, detail, train=False):
+    def update(self, tag_id, title, detail, train=False, threshold=None):
         tags = self.load()
         for tag in tags:
             if tag["id"] == tag_id:
                 tag["title"] = title.strip()
                 tag["detail"] = detail.strip()
                 tag["train"] = bool(train)
+                tag["threshold"] = self._threshold(threshold)
                 break
         self.save(tags)
+
+    def _threshold(self, value):
+        if value is None:
+            return self.settings.conf_threshold
+        return clamp_threshold(value, self.settings.conf_threshold)
 
     def delete(self, tag_id):
         tags = [tag for tag in self.load() if tag["id"] != tag_id]

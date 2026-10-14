@@ -21,7 +21,9 @@ class GestureSmoother:
         self.ema = alpha * proba + (1.0 - alpha) * self.ema
         idx = int(np.argmax(self.ema))
         conf = float(self.ema[idx])
-        label = self.settings.gestures[idx] if conf >= self.settings.conf_threshold else "none"
+        limits = getattr(self.settings, "thresholds", None)
+        limit = float(limits[idx]) if limits is not None else self.settings.conf_threshold
+        label = self.settings.gestures[idx] if conf >= limit else "none"
         if label == self.label:
             self.count += 1
         else:

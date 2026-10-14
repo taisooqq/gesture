@@ -20,6 +20,8 @@ _CLICK_STATE = 1
 _KEYS = {"back": "[", "forward": "]", "refresh": "r"}
 _left_held = False
 _browser_lock = threading.Lock()
+_drive_lock = threading.Lock()
+_drive_enabled = False
 
 
 class _Point(Structure):
@@ -63,13 +65,37 @@ def move_ratio(rel_x, rel_y):
     """박스 안 비율을 메인 모니터의 같은 위치로 옮깁니다. 0, 0 이 왼쪽 위입니다."""
     if not trusted():
         return False
+    with _drive_lock:
+        if not _drive_enabled:
+            return False
+        ok = _warp(rel_x, rel_y)
+        # 옮긴 뒤에도 트랙패드는 커서를 움직인다. 떼 두면 실제 동작 동안 트랙패드가 멈춘다.
+        _core.CGAssociateMouseAndMouseCursorPosition(True)
+        return ok
+
+
+def arm_cursor():
+    """실제 동작이 커서를 따라가게 할 때 켭니다."""
+    global _drive_enabled
+    with _drive_lock:
+        _drive_enabled = True
+
+
+def release_cursor():
+    """검지가 커서를 놓지 않게 하고, 트랙패드가 커서를 움직이게 둡니다."""
+    global _drive_enabled
+    with _drive_lock:
+        _drive_enabled = False
+        _core.CGAssociateMouseAndMouseCursorPosition(True)
+
+
+def _warp(rel_x, rel_y):
     bounds = _core.CGDisplayBounds(_core.CGMainDisplayID())
     point = _Point(
         bounds.x + float(rel_x) * bounds.width,
         bounds.y + float(rel_y) * bounds.height,
     )
     error = _core.CGWarpMouseCursorPosition(point)
-    _core.CGAssociateMouseAndMouseCursorPosition(True)
     return error == 0
 
 

@@ -23,7 +23,7 @@ class HandOverlay:
             self._hands.close()
             self._hands = None
 
-    def draw(self, bgr):
+    def draw(self, bgr, numbers=True):
         """좌우가 뒤집힌 BGR 화면을 받아, 손 좌표를 그린 화면을 돌려줍니다."""
         if self.error:
             return bgr
@@ -42,7 +42,28 @@ class HandOverlay:
             self._drawing.draw_landmarks(
                 view, hand_landmarks, self._hands_api.HAND_CONNECTIONS
             )
-            self._write_coordinates(view, hand_landmarks)
+            if numbers:
+                self._write_coordinates(view, hand_landmarks)
+        return view
+
+    def write_tip_readout(self, view, lines):
+        """학습 좌표를 화면 오른쪽 위에 위에서부터 적습니다. 손 위에는 적지 않습니다."""
+        if not lines:
+            return view
+        if view is None:
+            return view
+        width = view.shape[1]
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        size = 0.72
+        gap = 8
+        margin = 12
+        y = margin
+        for text in lines:
+            (tw, th), _ = cv2.getTextSize(text, font, size, 5)
+            y += th
+            origin = (max(margin, width - tw - margin), y)
+            self._text(view, text, origin, 1.6)
+            y += gap
         return view
 
     def _write_coordinates(self, view, hand_landmarks):

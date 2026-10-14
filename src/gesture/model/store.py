@@ -59,8 +59,10 @@ class ModelStore:
         catalog = self._read_catalog()
         item = next(row for row in catalog["models"] if row["id"] == model_id)
         blob = joblib.load(self.directory / item["file"])
-        return blob["pipeline"], list(blob["tags"]), blob.get("features")
+        return blob["pipeline"], list(blob["tags"]), blob.get("features"), blob.get("thresholds") or {}
 
+
+    # 학습
     def train(self):
         samples = self._samples()
         if samples is None:
@@ -76,7 +78,7 @@ class ModelStore:
         )
         # 위에서 만든 관절 숫자와 태그 이름을 랜덤 포레스트가 나눈다.
         pipeline.fit(features, labels)
-        return self._save(pipeline, tags, videos, tag_counts)
+        return self._save(pipeline, tags, videos, tag_counts, self._thresholds_for(tags))
 
     def _samples(self):
         # 태그 목록에서 train 이 켜진 태그의 id 만 모은다. 폴더 이름과 같은 값이다.
@@ -125,7 +127,7 @@ class ModelStore:
                 # 이 영상에서 손을 찾은 1초 묶음이 하나라도 있으면 True.
                 used = False
                 # 학습 입력은 hand.py 의 window_features 다.
-                # 1초 묶음마다 손목 기준 다섯 손가락 끝의 위치와 이동을 한 줄로 넣는다.
+                # 1초 묶음마다 손가락 끝, 엄지·검지·중지 깊이, 굽은 각, 중지 10번 좌표를 한 줄로 넣는다.
                 # 15장 묶음을 5장씩 밀며 자른다. 1초보다 짧은 영상은 통째로 한 묶음이다.
                 for window in _sample_windows(path):
                     # 원본 좌표 한 줄과, 각도·속도·흔들림을 바꾼 줄을 같은 태그로 넣는다.
@@ -176,7 +178,13 @@ class ModelStore:
         # tags 는 클래스 이름, trained_videos 는 쓴 영상 경로, tag_counts 는 태그별 영상 수.
         return np.vstack(xs), np.array(ys), tags, trained_videos, tag_counts
 
-    def _save(self, pipeline, tags, videos, tag_counts):
+    def _thresholds_for(self, tags):
+        # 등록 화면의 점수는 다음 학습에 스냅샷으로 남는다. 이미 만든 모델은 바뀌지 않는다.
+        saved = {tag["id"]: tag.get("threshold") for tag in TagStore(self.settings).load()}
+        default = self.settings.conf_threshold
+        return {name: saved.get(name, default) for name in tags}
+
+    def _save(self, pipeline, tags, videos, tag_counts, thresholds):
         self.directory.mkdir(parents=True, exist_ok=True)
         catalog = self._read_catalog()
         model_id = self._next_id(catalog)
@@ -189,6 +197,7 @@ class ModelStore:
                 "videos": videos,
                 "features": HandAnalyzer.FEATURE_KIND,
                 "augmented": True,
+                "thresholds": thresholds,
             },
             self.directory / filename,
         )
@@ -200,6 +209,7 @@ class ModelStore:
             "videos": videos,
             "tag_counts": tag_counts,
             "augmented": True,
+            "thresholds": thresholds,
         }
         catalog["models"].append(record)
         catalog["active"] = model_id

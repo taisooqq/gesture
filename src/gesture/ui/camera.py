@@ -5,6 +5,7 @@ from collections import deque
 
 import cv2
 import numpy as np
+from PySide6.QtWidgets import QListWidgetItem
 
 from gesture.hand import HandAnalyzer
 from gesture.hand_track import HandOverlay
@@ -39,11 +40,18 @@ class CameraPane:
         self._play_clip()
 
     # 인식은 화면 전체를 본다. 중앙 초록 박스는 모니터 전체와 같은 비율이다.
+    # 커서를 클릭보다 먼저 옮긴다. 클릭을 먼저 보내면 검지가 내려간 다음 자리를 누르게 된다.
     def _show(self, frame):
-        roi, box = self.analyzer.crop(frame)
+        roi, record_box = self.analyzer.crop(frame)
         label, conf = self._predict(frame)
-        self._control(label)
+        # 인식 탭의 초록 박스는 포인터 영역이다. 등록 탭 네모는 녹화 영역이라 더 작다.
+        if self.tabs.currentIndex() == 0:
+            box = self.analyzer.center_box(frame, self.settings.pointer_scale)
+        else:
+            box = record_box
         self._aim(frame, box)
+        state = self._control(label)
+        self._track_log(label, state)
         if getattr(self, "_predict_note", None):
             text = self._predict_note
         elif self.model is None and label == "none":
@@ -58,7 +66,16 @@ class CameraPane:
                 text = f"제스처: {name}  {round(conf * 100)}%"
         self.recognize_status.setText(text)
 
-        view = self.hand_overlay.draw(frame)
+        # 인식 탭은 학습 좌표를 오른쪽 위에 적는다. 등록 탭은 관절 번호를 유지한다.
+        if self.tabs.currentIndex() == 0:
+            view = self.hand_overlay.draw(frame, numbers=False)
+            lines = self.analyzer.tip_coord_labels(frame)
+            if lines:
+                if view is frame:
+                    view = frame.copy()
+                self.hand_overlay.write_tip_readout(view, lines)
+        else:
+            view = self.hand_overlay.draw(frame)
         if self.hand_overlay.error:
             self.register_status.setText(self.hand_overlay.error)
         x, y, w, h = box
@@ -103,13 +120,23 @@ class CameraPane:
         contact = self.analyzer.contacts(frame)
         if contact is None:
             self._phase = None
+            self._pinch_low = None
             self.smoother.reset()
             return "none", 0.0
-        # 좌클릭·우클릭은 손가락이 맞닿아 있는 동안 유지한다. 드래그는 이 상태가 끝나기 전이다.
+        # 좌클릭은 붙은 동안 모델을 다시 보지 않는다. 그래서 인식 점수를 바꿔도 유지 중에는 영향이 없다.
+        # 중지 10번은 검지 끝보다 엄지에 가까워서, 손을 떼도 거리가 0.62 안에 남는 경우가 많다.
+        # 가장 붙었던 순간보다 벌어지면 클릭을 끝낸다.
         if self._phase in self.settings.hold_tags:
-            if contact[self._phase] < self.settings.pinch_off:
+            gap = contact[self._phase]
+            low = getattr(self, "_pinch_low", None)
+            if low is None:
+                low = gap
+            self._pinch_low = min(low, gap)
+            still = gap < self.settings.pinch_off and gap < self._pinch_low + self.settings.pinch_release
+            if still:
                 return self._phase, getattr(self, "_phase_conf", 1.0)
             self._phase = None
+            self._pinch_low = None
             self.smoother.reset()
             return "idle", 0.0
         kind = getattr(self, "model_features", None)
@@ -123,15 +150,22 @@ class CameraPane:
         if feat is None or (expected is not None and feat.shape[-1] != expected):
             self.smoother.reset()
             return "idle", 0.0
+        # 판단
         proba = self.model.predict_proba(feat.reshape(1, -1))[0]
         ordered = np.zeros(len(self.model_tags), dtype=np.float64)
         for index, cls in enumerate(self.model.classes_):
             ordered[int(cls)] = proba[index]
+        # 판단
         label, conf, _action, _fired = self.smoother.update(ordered)
+        label = self._swipe_by_facing(frame, label)
+        # 우클릭은 모델이 그렇게 말하면 그대로 쓴다. 손가락 거리로 막거나 유지하지 않는다.
+        if label == "right_click":
+            return label, conf
         # 맞닿아야 시작하는 동작. 모델이 말해도 손가락이 떨어져 있으면 시작하지 않는다.
         if label in self.settings.hold_tags and contact[label] < self.settings.pinch_on:
             self._phase = label
             self._phase_conf = conf
+            self._pinch_low = contact[label]
             return label, conf
         # 스와이프·원처럼 한 번 하는 동작. 움직임이 끝나면 끝난 자세를 학습하지 않고 무동작이다.
         if label not in self.settings.hold_tags and label not in ("none", "idle"):
@@ -140,20 +174,67 @@ class CameraPane:
                 return label, conf
         return "idle", 0.0
 
+    # 모델이 고른 스와이프를 다른 쪽으로 바꾸지 않는다.
+    # 뒤로가기는 모델이 뒤로가기이고 중지 끝 x가 -1 이하일 때만 나간다.
+    # 앞으로가기는 모델이 앞으로가기이고 중지 끝 x가 +1 이상일 때만 나간다.
+    # 손이 가운데로 돌아오며 반대 면이 보여도, 그때 모델이 말한 동작이 아니면 명령이 나가지 않는다.
+    def _swipe_by_facing(self, frame, label):
+        """뒤로가기·앞으로가기는 모델 판정과 중지 끝 x가 같이 맞을 때만 통과합니다."""
+        if label not in ("back", "forward"):
+            return label
+        middle_x = self.analyzer.middle_x(frame)
+        if middle_x is None:
+            return "idle"
+        if label == "back" and middle_x <= self.settings.dorsum_x:
+            return "back"
+        if label == "forward" and middle_x >= self.settings.palm_x:
+            return "forward"
+        return "idle"
+
+    # 한 번 한 동작이 여러 번 나가지 않게 막는다.
+    # 뒤로가기처럼 손을 한 번 저어도 속도가 잠깐 느려지면 무동작이 되었다가
+    # 바로 같은 동작으로 다시 보인다. 예전에는 무동작이 되는 즉시
+    # "이미 실행했다"는 기억을 지워서, 다음 장면에서 또 실행했다.
+    # 이제는 그 동작 이름을 기억해 두고, 무동작이 0.45초 동안 이어지기 전에는
+    # 같은 이름을 다시 보내지 않는다. 막힌 장면은 echo 를 돌려서 로그에도 새 줄을 만들지 않는다.
+    # 좌클릭만 예외다. 더블클릭은 0.45초를 기다리면 너무 느려서, 손을 떼자마자 다시 누를 수 있다.
+    # 다른 동작으로 바뀌면 기다리지 않고 바로 실행한다.
+    # 좌클릭은 붙는 순간 한 번 누르고, 손가락을 떼는 순간 한 번 놓는다.
     def _control(self, label):
-        """인식 탭에서만, 동작이 새로 시작될 때 한 번 사이트에 보냅니다."""
-        if self.tabs.currentIndex() != 0:
-            pointer.left_up()
-            self._sent_label = None
-            return
+        """실제 동작 버튼이 켜져 있고 인식 탭일 때만 마우스와 브라우저로 보냅니다."""
+        now = time.perf_counter()
+        armed = self.tabs.currentIndex() == 0 and self.live_button.isChecked()
+        if not armed:
+            if getattr(self, "_sent_label", None) == "left_click" or self.tabs.currentIndex() != 0:
+                pointer.left_up()
+            if self.tabs.currentIndex() != 0:
+                self._sent_label = None
+                self._blocked = None
+                return "idle"
+            if label in ("none", "idle"):
+                self._remember_until_quiet(label, now)
+                self._control_note = None
+                return "idle"
+            if label == getattr(self, "_sent_label", None):
+                return None
+            if label == getattr(self, "_blocked", None):
+                self._idle_since = None
+                return "echo"
+            self._sent_label = label
+            self._blocked = None
+            return "off"
         if label in ("none", "idle"):
             if getattr(self, "_sent_label", None) == "left_click":
                 pointer.left_up()
-            self._sent_label = label
+            self._remember_until_quiet(label, now)
             self._control_note = None
-            return
+            return "idle"
         if label == getattr(self, "_sent_label", None):
-            return
+            return None
+        if label == getattr(self, "_blocked", None):
+            self._idle_since = None
+            return "echo"
+        self._blocked = None
         self._sent_label = label
         if label == "left_click":
             ok = pointer.left_down()
@@ -162,31 +243,117 @@ class CameraPane:
         elif label in ("back", "forward", "refresh"):
             ok = pointer.browser(label)
         else:
-            return
+            return "off"
         if ok:
             self._control_note = None
-        else:
-            self._control_note = "손쉬운 사용 권한이 필요합니다"
+            return "ok"
+        self._control_note = "손쉬운 사용 권한이 필요합니다"
+        return "fail"
 
+    # 동작이 무동작으로 바뀌면 그 이름을 _blocked 에 남긴다.
+    # 무동작이 refire_seconds 만큼 이어지면 기억을 지워서 다음 실행을 허용한다.
+    # 그 전에 같은 동작이 다시 보이면 _control 이 실행을 막는다.
+    # 좌클릭은 여기에 넣지 않는다. 더블클릭이 0.45초를 기다리지 않게 하려고다.
+    def _remember_until_quiet(self, label, now):
+        """동작이 끝나면 그 이름을 남기고, 무동작이 충분히 길면 다음 실행을 허용합니다."""
+        if getattr(self, "_blocked", None) is None and self._sent_label not in (None, "none", "idle", "left_click"):
+            self._blocked = self._sent_label
+            self._idle_since = now
+        elif getattr(self, "_blocked", None) and getattr(self, "_idle_since", None) is None:
+            self._idle_since = now
+        self._sent_label = label
+        if (
+            getattr(self, "_blocked", None)
+            and getattr(self, "_idle_since", None) is not None
+            and now - self._idle_since >= self.settings.refire_seconds
+        ):
+            self._blocked = None
+            self._idle_since = None
+
+    # 오른쪽 목록은 동작이 바뀔 때마다 한 줄을 만든다.
+    # 같은 동작이 무동작으로 깜빡여 다시 보여도, echo 이면 줄을 만들지 않는다.
+    # 한 번 손을 젓고 페이지가 한 번만 넘어갔는데 기록이 여러 줄이 되지 않게 하려고다.
+    def _track_log(self, label, state):
+        """오른쪽 목록에 동작 이름, 유지 시간, 실행 여부를 남깁니다."""
+        if state == "echo":
+            return
+        now = time.perf_counter()
+        showing = label not in ("none", "idle") and state != "idle"
+        current = getattr(self, "_log_label", None)
+        if showing and label == current:
+            self._paint_log(now)
+            return
+        if current not in (None, "none", "idle"):
+            self._paint_log(now)
+            self._log_label = None
+        if not showing:
+            return
+        self._log_label = label
+        self._log_started = now
+        self._log_state = state if state in ("ok", "fail", "off") else "off"
+        self._log_clock = time.strftime("%H:%M:%S")
+        item = QListWidgetItem(self._log_text(0.0))
+        self.gesture_log.insertItem(0, item)
+        self._log_item = item
+        while self.gesture_log.count() > 40:
+            self.gesture_log.takeItem(self.gesture_log.count() - 1)
+
+    def _paint_log(self, now):
+        item = getattr(self, "_log_item", None)
+        if item is None:
+            return
+        item.setText(self._log_text(now - self._log_started))
+
+    def _log_text(self, seconds):
+        name = self.settings.gesture_ko.get(self._log_label, self._title(self._log_label))
+        mark = {"ok": "실행", "fail": "실패", "off": "인식"}.get(self._log_state, "인식")
+        return f"{self._log_clock}  {name}  {seconds:.1f}초  {mark}"
+
+    # 초록 박스 안 검지 끝은 모니터의 같은 비율 위치다. 박스 왼쪽 위는 화면 왼쪽 위다.
+    # 그 자리를 늦춰 따라가면 박스 구석이 화면 구석에 닿지 않는다.
+    # 손이 없으면 커서를 더 옮기지 않는다. 트랙패드로 마우스를 움직이게 하려고다.
+    # 좌클릭은 엄지가 중지 10번에 닿는다. 그때 검지 끝을 그대로 따라가면
+    # 클릭하는 순간 커서가 버튼 아래에 가 있다. 그래서 간격이 pinch_off 보다 가까워지는
+    # 첫 장면에 검지 끝을 기억하고, 그 자리를 클릭 위치로 바로 고정한다.
+    # 고정한 뒤에는 검지 끝을 보지 않고 손목이 얼마나 이동했는지만 더한다.
+    # 손은 옮겨 드래그되고, 검지만 구부리는 움직임은 커서에 섞이지 않는다.
+    # 손가락을 떼서 간격이 다시 멀어지면 검지 끝을 따라가는 상태로 돌아간다.
+    # 이 함수는 클릭을 보내기 전에 호출된다. 클릭이 기억해 둔 자리에서 나가게 하려고다.
     def _aim(self, frame, box):
-        """초록 박스 안 검지 끝을 모니터의 같은 비율 위치로 옮깁니다. 클릭 중에는 그 자리에 둡니다."""
-        if self.tabs.currentIndex() != 0:
-            self._aim_at = None
+        """초록 박스 안 검지 끝을 모니터의 같은 위치로 옮깁니다."""
+        if self.tabs.currentIndex() != 0 or not self.live_button.isChecked():
+            self._aim_lock = None
+            pointer.release_cursor()
             return
-        if getattr(self, "_phase", None) in self.settings.hold_tags:
+        if not pointer.trusted():
+            self._control_note = "손쉬운 사용 권한이 필요합니다"
             return
-        tip = self.analyzer.index_tip(frame)
-        if tip is None:
+        points = self.analyzer.pointing(frame)
+        if points is None:
+            self._aim_lock = None
+            pointer.release_cursor()
             return
+        pointer.arm_cursor()
+        tip_x, tip_y, wrist_x, wrist_y = points
+        contact = self.analyzer.contacts(frame)
+        # 검지를 펴고 가리킬 때는 박스 안 검지 끝이 모니터 전체다.
+        # 다른 손가락이 엄지 근처에 있는 것만으로 고정하면, 가리키는 동안 박스가 화면과 어긋난다.
+        # 좌클릭처럼 엄지가 중지 10번에 가까워질 때, 또는 클릭이 이미 유지될 때만 손목 기준으로 바꾼다.
+        closing = getattr(self, "_phase", None) in self.settings.hold_tags or (
+            contact is not None and contact["left_click"] < self.settings.pinch_on
+        )
         x, y, width, height = box
-        rel_x = min(1.0, max(0.0, (tip[0] - x) / width))
-        rel_y = min(1.0, max(0.0, (tip[1] - y) / height))
-        previous = getattr(self, "_aim_at", None)
-        if previous is not None:
-            weight = 0.65
-            rel_x = previous[0] + weight * (rel_x - previous[0])
-            rel_y = previous[1] + weight * (rel_y - previous[1])
-        self._aim_at = (rel_x, rel_y)
+        if closing:
+            if getattr(self, "_aim_lock", None) is None:
+                self._aim_lock = (tip_x, tip_y, wrist_x, wrist_y)
+            lock_x, lock_y, lock_wrist_x, lock_wrist_y = self._aim_lock
+            place_x = lock_x + (wrist_x - lock_wrist_x)
+            place_y = lock_y + (wrist_y - lock_wrist_y)
+        else:
+            self._aim_lock = None
+            place_x, place_y = tip_x, tip_y
+        rel_x = min(1.0, max(0.0, (place_x - x) / width))
+        rel_y = min(1.0, max(0.0, (place_y - y) / height))
         if not pointer.move_ratio(rel_x, rel_y):
             self._control_note = "손쉬운 사용 권한이 필요합니다"
 

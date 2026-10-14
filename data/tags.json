@@ -3,32 +3,44 @@
     {
       "id": "left_click",
       "title": "마우스 좌클릭",
-      "detail": "검지와 엄지가 맞닿음",
-      "train": true
+      "detail": "검지를 핀상태에서 엄지 접기",
+      "train": true,
+      "threshold": 0.65
     },
     {
       "id": "right_click",
       "title": "우클릭",
       "detail": "엄지와 나머지 손가락이 맞닿음",
-      "train": true
+      "train": true,
+      "threshold": 0.8
     },
     {
       "id": "back",
       "title": "뒤로가기",
       "detail": "손바닥을 세우고 오른쪽에서 왼쪽으로 움직임",
-      "train": true
+      "train": true,
+      "threshold": 0.7
     },
     {
       "id": "forward",
       "title": "앞으로가기",
       "detail": "손바닥을 세우고 왼쪽에서 오른쪽으로 움직임",
-      "train": true
+      "train": true,
+      "threshold": 0.95
     },
     {
       "id": "refresh",
       "title": "새로고침",
-      "detail": "검지를 돌림",
-      "train": true
+      "detail": "새끼손가락 올림",
+      "train": true,
+      "threshold": 0.65
+    },
+    {
+      "id": "tag_01",
+      "title": "스크린샷",
+      "detail": "중지올리기",
+      "train": true,
+      "threshold": 0.65
     }
   ]
 }

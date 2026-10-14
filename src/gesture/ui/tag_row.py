@@ -25,10 +25,13 @@ class TagRow(QFrame):
         self.detail_label.setWordWrap(True)
         text.addWidget(self.title_label)
         text.addWidget(self.detail_label)
+        marks = []
         if tag.get("train"):
-            train_label = QLabel("학습")
-            train_label.setStyleSheet("font-size: 11px; color: #3b82f6;")
-            text.addWidget(train_label)
+            marks.append("학습")
+        marks.append(f"점수 {round(float(tag.get('threshold', 0.65)) * 100)}%")
+        train_label = QLabel(" · ".join(marks))
+        train_label.setStyleSheet("font-size: 11px; color: #3b82f6;")
+        text.addWidget(train_label)
         self.count_label = QLabel(f"{count}")
         self.count_label.setStyleSheet("font-size: 12px; color: #6e6e73;")
         self.count_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
