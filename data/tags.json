@@ -5,14 +5,14 @@
       "title": "마우스 좌클릭 누르기",
       "detail": "검지를 핀상태에서 엄지 접기",
       "train": true,
-      "threshold": 0.65
+      "threshold": 0.8
     },
     {
       "id": "left_click_off",
       "title": "마우스 좌클릭 떼기",
       "detail": "접은 엄지 펴기",
       "train": true,
-      "threshold": 0.65
+      "threshold": 0.75
     },
     {
       "id": "right_click",
