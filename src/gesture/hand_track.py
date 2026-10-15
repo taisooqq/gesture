@@ -1,7 +1,6 @@
-"""캠 화면에 미디어파이프 손 좌표를 그립니다.
+"""캠 화면에 이미 찾은 손 좌표를 그립니다.
 
-손 좌표는 예제의 mp.solutions.hands 를 그대로 씁니다.
-미디어파이프 1.0 에는 이 API가 없고, 0.10.18 에서 동작합니다.
+관절은 HandAnalyzer 가 한 번 찾은 값을 그대로 씁니다.
 """
 
 import cv2
@@ -12,39 +11,39 @@ class HandOverlay:
     """한 손의 랜드마크와 연결선을 카메라 화면 위에 그립니다."""
 
     def __init__(self):
-        self._hands = None
-        self._drawing = mp.solutions.drawing_utils
-        self._hands_api = mp.solutions.hands
-
+        self._connections = mp.solutions.hands.HAND_CONNECTIONS
         self.error = None
 
     def close(self):
-        if self._hands is not None:
-            self._hands.close()
-            self._hands = None
+        return None
 
-    def draw(self, bgr, numbers=True):
-        """좌우가 뒤집힌 BGR 화면을 받아, 손 좌표를 그린 화면을 돌려줍니다."""
-        if self.error:
+    def draw(self, bgr, points, numbers=True):
+        """이미 찾은 관절로 손 선을 그립니다. 미디어파이프를 다시 돌리지 않습니다."""
+        if not points:
             return bgr
-        try:
-            self._ensure()
-        except Exception as exc:
-            self.error = f"손 좌표 모델을 열지 못했습니다. {exc}"
-            return bgr
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        rgb.flags.writeable = False
-        results = self._hands.process(rgb)
-        if not results.multi_hand_landmarks:
-            return bgr
+        joints = points["joints"]
+        height, width = bgr.shape[:2]
         view = bgr.copy()
-        for hand_landmarks in results.multi_hand_landmarks:
-            self._drawing.draw_landmarks(
-                view, hand_landmarks, self._hands_api.HAND_CONNECTIONS
+        for start, end in self._connections:
+            cv2.line(
+                view,
+                self._pixel(joints, start, width, height),
+                self._pixel(joints, end, width, height),
+                (80, 220, 60),
+                2,
             )
+        for index in range(len(joints)):
+            origin = self._pixel(joints, index, width, height)
+            cv2.circle(view, origin, 3, (40, 40, 220), -1)
             if numbers:
-                self._write_coordinates(view, hand_landmarks)
+                self._text(view, str(index), (origin[0] + 6, origin[1] - 6), max(height / 1200, 3))
         return view
+
+    def _pixel(self, joints, index, width, height):
+        point = joints[index]
+        x = min(max(int(point[0] * width), 0), width - 1)
+        y = min(max(int(point[1] * height), 0), height - 1)
+        return x, y
 
     def write_tip_readout(self, view, lines):
         """학습 좌표를 화면 오른쪽 위에 위에서부터 적습니다. 손 위에는 적지 않습니다."""
@@ -66,26 +65,8 @@ class HandOverlay:
             y += gap
         return view
 
-    def _write_coordinates(self, view, hand_landmarks):
-        """관절 번호를 점 옆에 적습니다."""
-        height, width = view.shape[:2]
-        scale = max(height / 1200, 3)
-        for index, point in enumerate(hand_landmarks.landmark):
-            x = min(max(int(point.x * width), 0), width - 1)
-            y = min(max(int(point.y * height), 0), height - 1)
-            self._text(view, str(index), (x + 6, y - 6), scale)
-
     def _text(self, view, text, origin, scale):
         font = cv2.FONT_HERSHEY_SIMPLEX
         size = 0.45 * scale
         cv2.putText(view, text, origin, font, size, (0, 0, 0), 3, cv2.LINE_AA)
         cv2.putText(view, text, origin, font, size, (255, 255, 255), 1, cv2.LINE_AA)
-
-    def _ensure(self):
-        if self._hands is not None:
-            return
-        self._hands = self._hands_api.Hands(
-            max_num_hands=1,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )

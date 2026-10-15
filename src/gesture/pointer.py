@@ -57,7 +57,10 @@ if sys.platform == "darwin":
         return bool(_access.AXIsProcessTrusted())
 
     def _cursor():
-        point = _core.CGEventGetLocation(_core.CGEventCreate(None))
+        event = _core.CGEventCreate(None)
+        point = _core.CGEventGetLocation(event)
+        if event:
+            _foundation.CFRelease(event)
         return point.x, point.y
 
     def _warp(rel_x, rel_y):
@@ -89,6 +92,18 @@ if sys.platform == "darwin":
             return _post(point, _LEFT_UP, _LEFT)
         return _post(point, _RIGHT_DOWN, _RIGHT) and _post(point, _RIGHT_UP, _RIGHT)
 
+    _core.CGEventCreateScrollWheelEvent.restype = c_void_p
+    _core.CGEventCreateScrollWheelEvent.argtypes = [c_void_p, c_uint32, c_uint32, c_int32]
+
+    def _scroll(steps):
+        # 양수는 위로, 음수는 아래로. 단위는 휠 한 칸이다.
+        event = _core.CGEventCreateScrollWheelEvent(None, 1, 1, int(steps))
+        if not event:
+            return False
+        _core.CGEventPost(_HID, event)
+        _foundation.CFRelease(event)
+        return True
+
     def _send_browser(action):
         subprocess.run(
             ["osascript", "-e", _BROWSER_SCRIPT, action],
@@ -97,6 +112,21 @@ if sys.platform == "darwin":
             text=True,
             timeout=4,
         )
+
+    def _send_screenshot():
+        subprocess.run(
+            ["osascript", "-e", _SCREENSHOT_SCRIPT],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+
+    _SCREENSHOT_SCRIPT = r'''
+tell application "System Events"
+  keystroke "3" using {command down, shift down}
+end tell
+'''
 
     _BROWSER_SCRIPT = r'''
 on run argv
@@ -146,6 +176,8 @@ elif sys.platform == "win32":
     _MOUSE_LEFT_UP = 0x0004
     _MOUSE_RIGHT_DOWN = 0x0008
     _MOUSE_RIGHT_UP = 0x0010
+    _MOUSE_WHEEL = 0x0800
+    _WHEEL_DELTA = 120
     _KEY_UP = 0x0002
     _MONITOR_PRIMARY = 1
     _SW_RESTORE = 9
@@ -299,6 +331,12 @@ elif sys.platform == "win32":
         entry.mi.dwFlags = flags[kind]
         return _send_input(entry)
 
+    def _scroll(steps):
+        entry = _INPUT(type=_INPUT_MOUSE)
+        entry.mi.dwFlags = _MOUSE_WHEEL
+        entry.mi.mouseData = (int(steps) * _WHEEL_DELTA) & 0xFFFFFFFF
+        return _send_input(entry)
+
     def _exe_name(hwnd):
         pid = wintypes.DWORD()
         _user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
@@ -358,6 +396,14 @@ elif sys.platform == "win32":
         _tap(key, True)
         _tap(modifier, True)
 
+    def _send_screenshot():
+        # Win+PrintScreen. 전체 화면을 그림 파일로 저장한다.
+        _tap(0x5B, False)
+        _tap(0x2C, False)
+        time.sleep(0.02)
+        _tap(0x2C, True)
+        _tap(0x5B, True)
+
 else:
 
     def _trusted():
@@ -375,7 +421,13 @@ else:
     def _click(_kind):
         return False
 
+    def _scroll(_steps):
+        return False
+
     def _send_browser(_action):
+        return None
+
+    def _send_screenshot():
         return None
 
 
@@ -416,6 +468,13 @@ def release_cursor():
         _associate(True)
 
 
+def scroll(steps):
+    """휠을 보냅니다. 양수는 위, 음수는 아래입니다."""
+    if not trusted() or not steps:
+        return False
+    return _scroll(int(steps))
+
+
 def right_click():
     """포인터 위치에 우클릭을 한 번 보냅니다. 그 자리의 사이트가 메뉴를 엽니다."""
     if not trusted():
@@ -442,6 +501,23 @@ def left_up():
         return True
     _click("left_up")
     _left_held = False
+    return True
+
+
+def screenshot():
+    """전체 화면을 한 장 찍습니다. 맥은 Command+Shift+3, 윈도우는 Win+PrintScreen입니다."""
+    if not trusted():
+        return False
+    if not _browser_lock.acquire(blocking=False):
+        return True
+
+    def run():
+        try:
+            _send_screenshot()
+        finally:
+            _browser_lock.release()
+
+    threading.Thread(target=run, daemon=True).start()
     return True
 
 

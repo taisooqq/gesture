@@ -40,8 +40,12 @@ class Settings:
         self.hold_frames = 8
         # 태그에 점수가 없을 때 쓰는 기본값. 동작마다 다른 점수는 태그 threshold 다.
         self.conf_threshold = 0.65
-        # 맞닿은 동안 유지하는 동작. 우클릭은 모델 판정만 쓰고, 드래그는 좌클릭을 놓기 전이다.
-        self.hold_tags = ("left_click",)
+        # 손가락 거리로 유지하지 않는다. 좌클릭은 누르기·떼기 모션이 각각 명령을 보낸다.
+        self.hold_tags = ()
+        # 손을 한 번 저어야 하는 동작. 자세로 바뀐 새로고침과 스크롤, 클릭은 여기 없다.
+        self.motion_tags = ("back", "forward")
+        # 스크롤 자세가 유지되는 동안 휠을 보내는 간격.
+        self.scroll_interval = 0.08
         # 손 크기(손목~중지 뿌리)로 나눈 끝 거리. 이보다 가까우면 잡고, 멀어지면 놓는다.
         self.pinch_on = 0.42
         self.pinch_off = 0.62
@@ -71,22 +75,34 @@ class Settings:
         self.camera_aspect_h = 9
         # 이미 16:9가 아니면 앞에서부터 요청한다. 맥 FaceTime은 1920×1080이라 그대로 둔다.
         self.camera_sizes = ((1920, 1080), (1280, 720))
+        # 0이 가벼운 손 모델이다. 1은 더 정확하고 더 느리다.
+        self.hand_complexity = 1
         # 모델 8부터 학습 좌표만 불린다. 위치와 크기는 이미 빠져 있어 각도, 속도, 흔들림만 넣는다.
         self.augment_rotations = (-18, -9, 9, 18)
         self.augment_speeds = (0.65, 1.4)
         self.augment_jitter = 0.02
         self.augment_jitter_copies = 2
-        self.train_tag_ids = ("left_click", "right_click", "back", "forward", "refresh")
+        self.train_tag_ids = (
+            "left_click_on",
+            "left_click_off",
+            "right_click",
+            "back",
+            "forward",
+            "refresh",
+            "screenshot",
+            "scroll_up",
+            "scroll_down",
+        )
         self.video_tags = (
-            ("pointer", "마우스포인터 움직임", "검지손가락의 방향"),
-            ("left_click", "마우스 좌클릭", "검지와 엄지가 맞닿음"),
-            ("right_click", "우클릭", "엄지와 중지가 맞닿음"),
-            ("back", "뒤로가기", "검지, 중지를 펴고 오른쪽에서 왼쪽으로"),
-            ("forward", "앞으로가기", "검지, 중지를 펴고 왼쪽에서 오른쪽으로"),
-            ("refresh", "새로고침", "검지를 돌림"),
-            ("drag", "드래그", "좌클릭을 유지"),
-            ("drop", "드롭", "손을 놓음"),
-            ("idle", "무동작", "주먹"),
+            ("left_click_on", "마우스 좌클릭 누르기", "검지를 핀상태에서 엄지 접기"),
+            ("left_click_off", "마우스 좌클릭 떼기", "접은 엄지 펴기"),
+            ("right_click", "우클릭", "엄지와 검지를 제외한 나머지 손가락이 맞닿음"),
+            ("back", "뒤로가기", "손바닥을 세우고 오른쪽에서 왼쪽으로 움직임"),
+            ("forward", "앞으로가기", "손바닥을 세우고 왼쪽에서 오른쪽으로 움직임"),
+            ("refresh", "새로고침", "새끼손가락 올림"),
+            ("screenshot", "스크린샷", "중지올리기"),
+            ("scroll_up", "위로 스크롤", "따봉"),
+            ("scroll_down", "아래로 스크롤", "로키 따봉"),
         )
         self.model_path = self.root / "models" / "gesture.joblib"
 

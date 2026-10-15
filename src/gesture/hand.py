@@ -15,6 +15,8 @@ class HandAnalyzer:
     def __init__(self, settings=None):
         self.settings = settings or default_settings
         self._hands = None
+        self._hands_static = None
+        self._static_image = False
         self.hands_error = None
         self._point_cache = OrderedDict()
 
@@ -474,6 +476,10 @@ class HandAnalyzer:
             total += float(np.arctan2(cross, dot))
         return abs(total)
 
+    def landmarks(self, frame):
+        """이 화면의 관절입니다. 같은 화면이면 미디어파이프를 다시 돌리지 않습니다."""
+        return self._finger_points(frame)
+
     def _finger_points(self, bgr):
         """한 장에서 관절 21개를 찾습니다. 손이 없으면 None입니다."""
         key = self._frame_key(bgr)
@@ -513,19 +519,32 @@ class HandAnalyzer:
             return None
         return {"joints": joints, "wrist": wrist, "scale": scale, "depth": depth}
 
+    def use_static(self, static):
+        """학습 영상은 장마다 따로 찾고, 카메라는 이전 손을 이어 추적합니다."""
+        self._static_image = bool(static)
+
     def _ensure_hands(self):
-        """추적 없이 한 장씩 찾습니다. 영상 파일이 바뀌어도 이전 손이 남지 않습니다."""
-        if self._hands is not None:
+        """손 모델을 엽니다. 카메라와 학습의 찾기 방식이 다르면 다시 엽니다."""
+        static = self._static_image
+        if self._hands is not None and self._hands_static == static:
             return self._hands
-        if self.hands_error:
+        if self.hands_error and self._hands is None and self._hands_static == static:
             return None
+        if self._hands is not None:
+            self._hands.close()
+            self._hands = None
         try:
             self._hands = mp.solutions.hands.Hands(
-                static_image_mode=True,
+                static_image_mode=static,
                 max_num_hands=1,
+                model_complexity=self.settings.hand_complexity,
                 min_detection_confidence=0.5,
+                min_tracking_confidence=0.5,
             )
         except Exception as exc:
             self.hands_error = f"손 좌표 모델을 열지 못했습니다. {exc}"
+            self._hands_static = static
             return None
+        self.hands_error = None
+        self._hands_static = static
         return self._hands

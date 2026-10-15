@@ -64,7 +64,12 @@ class ModelStore:
 
     # 학습
     def train(self):
-        samples = self._samples()
+        # 학습 영상은 앞 장면의 손을 기억하면 다음 영상의 좌표가 달라진다.
+        self.analyzer.use_static(True)
+        try:
+            samples = self._samples()
+        finally:
+            self.analyzer.use_static(False)
         if samples is None:
             raise RuntimeError("저장된 영상이 없습니다. 먼저 태그를 골라 녹화하세요.")
         features, labels, tags, videos, tag_counts = samples
