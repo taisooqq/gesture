@@ -147,10 +147,18 @@ class HandAnalyzer:
         return self._tip_rows_joint10(valid, scale)
 
     def augmented_features(self, frames):
-        """학습용. 원본 한 줄과, 같은 좌표를 돌리고 속도를 바꾸고 흔든 줄을 함께 만듭니다."""
+        """학습용. 원본과 사다리꼴 두 벌에, 회전·속도·흔들림을 각각 붙입니다."""
         valid, scale = self._valid_frames(frames)
         if valid is None:
             return []
+        rows = self._augment_rows(valid, scale)
+        for amount in self.settings.augment_trapezoids:
+            shaped = self._trapezoid_frames(valid, float(amount))
+            rows.extend(self._augment_rows(shaped, self._frame_scale(shaped)))
+        return rows
+
+    def _augment_rows(self, valid, scale):
+        """한 벌의 좌표에서 원본, 회전, 속도, 흔들림 줄을 만듭니다."""
         rows = [self._tip_rows_joint10(valid, scale)]
         for degrees in self.settings.augment_rotations:
             rows.append(self._tip_rows_joint10(self._rotate_frames(valid, degrees), scale))
@@ -162,6 +170,28 @@ class HandAnalyzer:
             shaken = self._jitter_frames(valid, scale, rng)
             rows.append(self._tip_rows_joint10(shaken, self._frame_scale(shaken)))
         return rows
+
+    def _trapezoid_frames(self, valid, amount):
+        """화면 위쪽 가로를 늘리고 아래쪽 가로를 줄입니다. 세로는 그대로입니다."""
+        shaped = []
+        for item in valid:
+            joints = item["joints"].copy()
+            # y 는 0 이 화면 위, 1 이 화면 아래다. 가로 배율은 그 사이에서 직선으로 변한다.
+            scale_x = (1.0 + amount) - (2.0 * amount) * joints[:, 1]
+            joints[:, 0] = 0.5 + (joints[:, 0] - 0.5) * scale_x
+            wrist = joints[self._WRIST]
+            frame_scale = float(np.linalg.norm(joints[self._MIDDLE_MCP] - wrist))
+            if frame_scale < 1e-4:
+                frame_scale = float(item["scale"])
+            shaped.append(
+                {
+                    "joints": joints.astype(np.float32),
+                    "wrist": wrist,
+                    "scale": frame_scale,
+                    "depth": item["depth"],
+                }
+            )
+        return shaped
 
     # 화면 위 위치는 다섯 손가락 끝의 x, y 다. 깊이는 엄지, 검지, 중지 끝만 더한다.
     # z 는 손목을 뺀 뒤 손 크기로 나눈다. 1초 중간의 깊이와, 처음에서 끝까지 깊이가 변한 양이다.

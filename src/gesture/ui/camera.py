@@ -44,6 +44,7 @@ class CameraPane:
     def _show(self, frame):
         roi, record_box = self.analyzer.crop(frame)
         label, conf = self._predict(frame)
+        label, conf = self._gate(label, conf)
         # 인식 탭의 초록 박스는 포인터 영역이다. 등록 탭 네모는 녹화 영역이라 더 작다.
         if self.tabs.currentIndex() == 0:
             box = self.analyzer.center_box(frame, self.settings.pointer_scale)
@@ -180,9 +181,9 @@ class CameraPane:
     # "이미 실행했다"는 기억을 지워서, 다음 장면에서 또 실행했다.
     # 이제는 그 동작 이름을 기억해 두고, 무동작이 0.45초 동안 이어지기 전에는
     # 같은 이름을 다시 보내지 않는다. 막힌 장면은 echo 를 돌려서 로그에도 새 줄을 만들지 않는다.
-    # 좌클릭 누르기·떼기와 스크롤은 예외다. 더블클릭과 연속 스크롤이 0.45초를 기다리지 않는다.
-    # 다른 동작으로 바뀌면 기다리지 않고 바로 실행한다.
-    # 좌클릭 누르기는 버튼을 누른 채로 두고, 떼기 모션이 나올 때 놓는다.
+    # 한 번 끝나는 동작은 인식된 뒤 0.45초 동안 다른 동작을 받지 않는다.
+    # 스크롤은 자세가 유지되는 동안 휠을 이어 보낸다.
+    # 좌클릭은 떼기 모션이 나오기 전까지 유지한다. 떼기는 버튼이 눌려 있을 때만 받는다.
     def _control(self, label):
         """실제 동작 버튼이 켜져 있고 인식 탭일 때만 마우스와 브라우저로 보냅니다."""
         now = time.perf_counter()
@@ -223,6 +224,9 @@ class CameraPane:
             return "echo"
         self._blocked = None
         self._sent_label = label
+        if label in self._MOMENTARY:
+            self._lock_until = now + self.settings.refire_seconds
+            self._lock_label = label
         if label == "left_click_on":
             ok = pointer.left_down()
             if ok:
@@ -249,7 +253,26 @@ class CameraPane:
         return "fail"
 
     _SCROLLS = {"scroll_up": 1, "scroll_down": -1}
+    _MOMENTARY = ("back", "forward", "refresh", "right_click", "screenshot")
+    _TIMED = {"left_click_on", "scroll_up", "scroll_down"}
     _NO_REFIRE = {"left_click_on", "left_click_off", "scroll_up", "scroll_down"}
+
+    def _gate(self, label, conf):
+        """모델 결과를 유지 규칙에 맞게 다시 고릅니다."""
+        now = time.perf_counter()
+        if label == "left_click_on":
+            self._click_conf = conf
+        if getattr(self, "_click_held", False):
+            if label == "none":
+                return label, conf
+            if label == "left_click_off":
+                return label, conf
+            return "left_click_on", getattr(self, "_click_conf", conf)
+        if label == "left_click_off":
+            return "idle", 0.0
+        if now < getattr(self, "_lock_until", 0.0) and label != getattr(self, "_lock_label", None):
+            return "idle", 0.0
+        return label, conf
 
     def _release_click(self):
         if getattr(self, "_click_held", False):
@@ -331,6 +354,8 @@ class CameraPane:
     def _log_text(self, seconds):
         name = self.settings.gesture_ko.get(self._log_label, self._title(self._log_label))
         mark = {"ok": "실행", "fail": "실패", "off": "인식"}.get(self._log_state, "인식")
+        if self._log_label not in self._TIMED:
+            return f"{self._log_clock}  {name}  {mark}"
         return f"{self._log_clock}  {name}  {seconds:.1f}초  {mark}"
 
     # 초록 박스 안 검지 끝은 모니터의 같은 비율 위치다. 박스 왼쪽 위는 화면 왼쪽 위다.

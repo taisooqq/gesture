@@ -75,7 +75,9 @@ class ClipPane:
         for path in paths:
             relative = path.relative_to(self.settings.video_dir).as_posix()
             mark = "학습됨" if relative in trained else "미학습"
-            item = QListWidgetItem(f"{path.name}    {mark}")
+            frames = _frame_count(path)
+            count = f"{frames}프레임" if frames else "프레임 없음"
+            item = QListWidgetItem(f"{path.name}    {count}    {mark}")
             item.setData(Qt.UserRole, str(path))
             self.clip_list.addItem(item)
             if selected is not None and path == Path(selected):
@@ -155,3 +157,13 @@ class ClipPane:
         if self.tag:
             self._refresh_tag(self.tag)
         self.register_status.setText("영상을 삭제했습니다.")
+
+
+def _frame_count(path):
+    """저장 영상의 프레임 수. 열리지 않으면 None입니다."""
+    cap = open_video(path)
+    if not cap.isOpened():
+        return None
+    count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return count if count > 0 else None

@@ -135,7 +135,7 @@ class ModelStore:
                 # 1초 묶음마다 손가락 끝, 엄지·검지·중지 깊이, 굽은 각, 중지 10번 좌표를 한 줄로 넣는다.
                 # 15장 묶음을 5장씩 밀며 자른다. 1초보다 짧은 영상은 통째로 한 묶음이다.
                 for window in _sample_windows(path):
-                    # 원본 좌표 한 줄과, 각도·속도·흔들림을 바꾼 줄을 같은 태그로 넣는다.
+                    # 원본과 사다리꼴 두 벌에, 각도·속도·흔들림을 같은 태그로 넣는다.
                     # 손이 거의 없으면 빈 목록이다. 모델 7까지는 이 과정이 없다.
                     feats = self.analyzer.augmented_features(window)
                     for feat in feats:
