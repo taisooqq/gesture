@@ -46,6 +46,9 @@ class Settings:
         self.motion_tags = ("back", "forward")
         # 스크롤 자세가 유지되는 동안 휠을 보내는 간격.
         self.scroll_interval = 0.08
+        # 좌클릭을 누른 뒤 떼기만 최근 이 시간으로 본다.
+        # 1초 창에는 접힌 자세가 남아 떼기가 늦다.
+        self.release_seconds = 0.5
         # 손 크기(손목~중지 뿌리)로 나눈 끝 거리. 이보다 가까우면 잡고, 멀어지면 놓는다.
         self.pinch_on = 0.42
         self.pinch_off = 0.62

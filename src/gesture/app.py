@@ -14,6 +14,5 @@ class App:
 
         GestureWindow(camera=args.camera).run()
 
-
 def main():
     App().run()

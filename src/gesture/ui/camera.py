@@ -127,6 +127,9 @@ class CameraPane:
             self.smoother.reset()
             return "none", 0.0
         kind = getattr(self, "model_features", None)
+        # 누르는 동안은 떼기만 최근 0.5초로 본다. 1초 창에는 접힌 자세가 남아 늦다.
+        if getattr(self, "_press_wait", False):
+            return self._predict_release(kind)
         # 윤곽 숫자 8개 모델은 한 장만 본다. 관절 모델은 최근 1초가 모여야 한다.
         single = kind not in HandAnalyzer.WINDOW_KINDS
         if not single and now - self._recent_frames[0][0] < 0.8:
@@ -157,6 +160,33 @@ class CameraPane:
         if label not in ("none", "idle"):
             return label, conf
         return "idle", 0.0
+
+    def _predict_release(self, kind):
+        """누르기가 켜진 동안 최근 짧은 구간만 보고 떼기인지 판단합니다."""
+        frames = self._frames_within(self.settings.release_seconds)
+        if kind in HandAnalyzer.WINDOW_KINDS:
+            frames = self._sample_frames(frames, 15)
+        else:
+            frames = frames[-1:]
+        held = getattr(self, "_click_conf", 0.0)
+        feat = self.analyzer.features_for(frames, kind) if frames else None
+        expected = getattr(self.model, "n_features_in_", None)
+        if feat is None or (expected is not None and feat.shape[-1] != expected):
+            return "left_click_on", held
+        if "left_click_off" not in self.model_tags:
+            return "left_click_on", held
+        proba = self.model.predict_proba(feat.reshape(1, -1))[0]
+        ordered = np.zeros(len(self.model_tags), dtype=np.float64)
+        for index, cls in enumerate(self.model.classes_):
+            ordered[int(cls)] = proba[index]
+        index = self.model_tags.index("left_click_off")
+        conf = float(ordered[index])
+        limits = getattr(self.smoother.settings, "thresholds", None)
+        limit = float(limits[index]) if limits is not None else self.settings.conf_threshold
+        if int(np.argmax(ordered)) == index and conf >= limit:
+            self.smoother.reset()
+            return "left_click_off", conf
+        return "left_click_on", held
 
     # 모델이 고른 스와이프를 다른 쪽으로 바꾸지 않는다.
     # 뒤로가기는 모델이 뒤로가기이고 중지 끝 x가 -1 이하일 때만 나간다.
@@ -421,6 +451,10 @@ class CameraPane:
     def _even_frames(self, count):
         """최근 1초에 모인 화면을 학습 묶음과 같은 장 수로 고릅니다."""
         frames = [frame for _stamp, frame in self._recent_frames]
+        return self._sample_frames(frames, count)
+
+    def _sample_frames(self, frames, count):
+        """고른 화면을 같은 간격으로 count 장까지 줄입니다."""
         if len(frames) <= count:
             return frames
         indexes = np.linspace(0, len(frames) - 1, num=count, dtype=int)
