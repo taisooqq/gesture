@@ -75,11 +75,11 @@ if sys.platform == "darwin":
     def _associate(enabled):
         _core.CGAssociateMouseAndMouseCursorPosition(bool(enabled))
 
-    def _post(point, event_type, button, click_state=1):
+    def _post(point, event_type, button):
         event = _core.CGEventCreateMouseEvent(None, event_type, point, button)
         if not event:
             return False
-        _core.CGEventSetIntegerValueField(event, _CLICK_STATE, int(click_state))
+        _core.CGEventSetIntegerValueField(event, _CLICK_STATE, 1)
         _core.CGEventPost(_HID, event)
         _foundation.CFRelease(event)
         return True
@@ -90,10 +90,6 @@ if sys.platform == "darwin":
             return _post(point, _LEFT_DOWN, _LEFT)
         if kind == "left_up":
             return _post(point, _LEFT_UP, _LEFT)
-        if kind == "double":
-            first = _post(point, _LEFT_DOWN, _LEFT, 1) and _post(point, _LEFT_UP, _LEFT, 1)
-            second = _post(point, _LEFT_DOWN, _LEFT, 2) and _post(point, _LEFT_UP, _LEFT, 2)
-            return first and second
         return _post(point, _RIGHT_DOWN, _RIGHT) and _post(point, _RIGHT_UP, _RIGHT)
 
     _core.CGEventCreateScrollWheelEvent.restype = c_void_p
@@ -118,19 +114,11 @@ if sys.platform == "darwin":
         )
 
     def _send_screenshot():
-        subprocess.run(
-            ["osascript", "-e", _SCREENSHOT_SCRIPT],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=4,
-        )
-
-    _SCREENSHOT_SCRIPT = r'''
-tell application "System Events"
-  keystroke "3" using {command down, shift down}
-end tell
-'''
+        # 단축키는 영역 선택 창이 뜰 수 있다. 메인 화면 전체를 바탕화면에 바로 저장한다.
+        folder = os.path.expanduser("~/Desktop")
+        stamp = time.strftime("%Y-%m-%d %H.%M.%S")
+        path = os.path.join(folder, f"Screen Shot {stamp}.png")
+        subprocess.run(["screencapture", "-m", path], check=False, timeout=8)
 
     _BROWSER_SCRIPT = r'''
 on run argv
@@ -160,7 +148,8 @@ on run argv
     else if actionName is "forward" then
       keystroke "]" using command down
     else if actionName is "refresh" then
-      keystroke "r" using command down
+      -- 글자 r 은 Option 이 붙어 읽기 모드(Command+Option+R)가 열린다. R 키 코드만 보낸다.
+      key code 15 using {command down}
     end if
   end tell
   return "ok"
@@ -331,10 +320,6 @@ elif sys.platform == "win32":
         }
         if kind == "right":
             return _click("right_down") and _click("right_up")
-        if kind == "double":
-            first = _click("left_down") and _click("left_up")
-            second = _click("left_down") and _click("left_up")
-            return first and second
         entry = _INPUT(type=_INPUT_MOUSE)
         entry.mi.dwFlags = flags[kind]
         return _send_input(entry)
@@ -490,16 +475,6 @@ def right_click():
     return _click("right")
 
 
-def double_click():
-    """포인터 위치에 왼쪽 버튼을 두 번 누릅니다."""
-    global _left_held
-    if not trusted():
-        return False
-    ok = _click("double")
-    _left_held = False
-    return ok
-
-
 def left_down():
     """좌클릭을 누른 채로 둡니다. 드래그는 손가락을 떼기 전까지 유지됩니다."""
     global _left_held
@@ -523,7 +498,7 @@ def left_up():
 
 
 def screenshot():
-    """전체 화면을 한 장 찍습니다. 맥은 Command+Shift+3, 윈도우는 Win+PrintScreen입니다."""
+    """전체 화면을 한 장 찍습니다. 맥은 메인 화면을 바탕화면에 저장하고, 윈도우는 Win+PrintScreen입니다."""
     if not trusted():
         return False
     if not _browser_lock.acquire(blocking=False):

@@ -237,8 +237,6 @@ class CameraPane:
             self._click_held = False
         elif label == "right_click":
             ok = pointer.right_click()
-        elif label == "double_click":
-            ok = pointer.double_click()
         elif label in ("back", "forward", "refresh"):
             ok = pointer.browser(label)
         elif label == "screenshot":
@@ -256,7 +254,7 @@ class CameraPane:
         return "fail"
 
     _SCROLLS = {"scroll_up": 1, "scroll_down": -1}
-    _MOMENTARY = ("back", "forward", "refresh", "right_click", "double_click", "screenshot")
+    _MOMENTARY = ("back", "forward", "refresh", "right_click", "screenshot")
     _TIMED = {"left_click_on", "scroll_up", "scroll_down"}
     _NO_REFIRE = {"left_click_on", "left_click_off", "scroll_up", "scroll_down"}
 

@@ -62,13 +62,6 @@
       "detail": "로키 따봉",
       "train": true,
       "threshold": 0.65
-    },
-    {
-      "id": "double_click",
-      "title": "더블클릭",
-      "detail": "좌클릭 연속2번",
-      "train": true,
-      "threshold": 0.65
     }
   ]
 }

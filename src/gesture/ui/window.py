@@ -222,7 +222,7 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         self._reload_models()
 
     def _toggle_live(self, checked):
-        """실제 동작이 켜지면 창을 작게 줄여 화면 맨 위에 고정합니다."""
+        """실제 동작이 켜지면 창을 작게 줄입니다. 화면 맨 위로는 옮기지 않습니다."""
         self.live_button.setText("실제 동작 켜짐" if checked else "실제 동작")
         if not checked:
             pointer.left_up()
@@ -252,8 +252,9 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         screen = self.window.screen().availableGeometry()
         width = min(760, screen.width() - 24)
         height = 280
-        x = screen.x() + max(0, (screen.width() - width) // 2)
-        y = screen.y() + 8
+        current = self.window.geometry()
+        x = min(max(screen.x(), current.x()), screen.x() + screen.width() - width)
+        y = min(max(screen.y(), current.y()), screen.y() + screen.height() - height)
         self.window.show()
         self.window.setGeometry(x, y, width, height)
         self.window.raise_()
