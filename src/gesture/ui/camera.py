@@ -218,6 +218,7 @@ class CameraPane:
         if label in self._SCROLLS and label == getattr(self, "_sent_label", None):
             return self._repeat_scroll(label, now)
         if label == getattr(self, "_sent_label", None):
+            self._hold_mouse_if_waiting(label)
             return None
         if label == getattr(self, "_blocked", None):
             self._idle_since = None
@@ -260,19 +261,32 @@ class CameraPane:
     def _gate(self, label, conf):
         """모델 결과를 유지 규칙에 맞게 다시 고릅니다."""
         now = time.perf_counter()
-        if label == "left_click_on":
-            self._click_conf = conf
-        if getattr(self, "_click_held", False):
-            if label == "none":
-                return label, conf
+        if label == "none":
+            self._press_wait = False
+            return label, conf
+        if getattr(self, "_press_wait", False):
             if label == "left_click_off":
+                self._press_wait = False
                 return label, conf
             return "left_click_on", getattr(self, "_click_conf", conf)
         if label == "left_click_off":
             return "idle", 0.0
         if now < getattr(self, "_lock_until", 0.0) and label != getattr(self, "_lock_label", None):
             return "idle", 0.0
+        if label == "left_click_on":
+            self._press_wait = True
+            self._click_conf = conf
         return label, conf
+
+    def _hold_mouse_if_waiting(self, label):
+        """누르기를 기다리는 중인데 버튼이 올라갔으면 다시 누릅니다."""
+        if label != "left_click_on" or not getattr(self, "_press_wait", False):
+            return
+        if getattr(self, "_click_held", False):
+            return
+        if pointer.left_down():
+            self._click_held = True
+            self._control_note = None
 
     def _release_click(self):
         if getattr(self, "_click_held", False):

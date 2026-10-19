@@ -1,6 +1,7 @@
 """저장한 영상으로 모델을 만들고, 모델마다 영상 개수를 기록합니다."""
 
 import json
+import random
 import re
 from datetime import datetime
 
@@ -85,7 +86,111 @@ class ModelStore:
         pipeline.fit(features, labels)
         return self._save(pipeline, tags, videos, tag_counts, self._thresholds_for(tags))
 
+    def evaluate(self):
+        """태그마다 영상의 20%를 빼고 맞힌 비율을 계산합니다. 모델은 저장하지 않습니다."""
+        self.analyzer.use_static(True)
+        try:
+            return self._evaluate()
+        finally:
+            self.analyzer.use_static(False)
+
+    def _evaluate(self):
+        folders = self._tagged_videos()
+        if folders is None:
+            raise RuntimeError("저장된 영상이 없습니다. 먼저 태그를 골라 녹화하세요.")
+        train_groups = []
+        test_groups = []
+        skipped = []
+        for name, videos in folders:
+            if len(videos) < 2:
+                skipped.append(name)
+                continue
+            train_paths, test_paths = _split_videos(videos)
+            train_groups.append((name, train_paths))
+            test_groups.append((name, test_paths))
+        if len(train_groups) < 2:
+            raise RuntimeError("인식률을 보려면 영상이 2개 이상인 태그가 2종류 있어야 합니다.")
+        trained = self._rows(train_groups, augment=True)
+        if trained is None:
+            raise RuntimeError("학습으로 쓸 영상에서 손을 찾지 못했습니다.")
+        features, labels, tags, _videos, _counts = trained
+        if len(tags) < 2:
+            raise RuntimeError("손이 잡힌 태그가 2종류 이상 있어야 인식률을 볼 수 있습니다.")
+        pipeline = Pipeline(
+            [
+                ("scaler", StandardScaler()),
+                ("clf", RandomForestClassifier(n_estimators=200, random_state=0)),
+            ]
+        )
+        pipeline.fit(features, labels)
+        thresholds = self._thresholds_for(tags)
+        titles = {tag["id"]: tag["title"] for tag in TagStore(self.settings).load()}
+        totals = {name: 0 for name in tags}
+        hits = {name: 0 for name in tags}
+        confused = {name: {} for name in tags}
+        test_videos = 0
+        kept = set(tags)
+        for name, videos in test_groups:
+            if name not in kept:
+                skipped.append(name)
+                continue
+            for path in videos:
+                used = False
+                for window in _sample_windows(path):
+                    feat = self.analyzer.window_features(window)
+                    if feat is None:
+                        continue
+                    used = True
+                    totals[name] += 1
+                    guess = self._guess(pipeline, tags, thresholds, feat)
+                    if guess == name:
+                        hits[name] += 1
+                    else:
+                        confused[name][guess] = confused[name].get(guess, 0) + 1
+                if used:
+                    test_videos += 1
+        for name in tags:
+            if totals[name] == 0 and name not in skipped:
+                skipped.append(name)
+        total = sum(totals.values())
+        if total == 0:
+            raise RuntimeError("시험 영상에서 손을 찾지 못했습니다.")
+        hit = sum(hits.values())
+        summary = f"전체 {round(100 * hit / total)}%  시험 묶음 {total}개, 영상 {test_videos}개"
+        lines = [summary, ""]
+        for name in tags:
+            if totals[name] == 0:
+                continue
+            title = titles.get(name, name)
+            lines.append(f"{title}  {round(100 * hits[name] / totals[name])}%  {hits[name]}/{totals[name]}")
+            wrong = sorted(confused[name].items(), key=lambda item: item[1], reverse=True)
+            if wrong:
+                parts = []
+                for guess, count in wrong:
+                    label = "무동작" if guess is None else titles.get(guess, guess)
+                    parts.append(f"{label} {count}")
+                lines.append("  다른 판정: " + ", ".join(parts))
+        if skipped:
+            names = ", ".join(titles.get(name, name) for name in skipped)
+            lines.extend(["", f"영상이 적거나 손을 못 찾아 빼 둠: {names}"])
+        return {"summary": summary, "detail": "\n".join(lines)}
+
+    def _guess(self, pipeline, tags, thresholds, feat):
+        """기준점 미만이면 무동작입니다. 무동작은 None 으로 돌려줍니다."""
+        proba = pipeline.predict_proba(feat.reshape(1, -1))[0]
+        index = int(np.argmax(proba))
+        name = tags[int(pipeline.classes_[index])]
+        if float(proba[index]) < thresholds.get(name, self.settings.conf_threshold):
+            return None
+        return name
+
     def _samples(self):
+        folders = self._tagged_videos()
+        if folders is None:
+            return None
+        return self._rows(folders, augment=True)
+
+    def _tagged_videos(self):
         # 태그 목록에서 train 이 켜진 태그의 id 만 모은다. 폴더 이름과 같은 값이다.
         allowed = set(TagStore(self.settings).train_ids())
         # 학습에 넣을 (태그 이름, avi 목록). 이름 순으로 쌓이므로 이 순서가 곧 클래스 번호가 된다.
@@ -116,6 +221,9 @@ class ModelStore:
                 raise RuntimeError("학습으로 지정된 태그에 영상이 없습니다.")
             # 녹화 영상 자체가 없다. train() 이 이 None 을 보고 녹화 안내를 낸다.
             return None
+        return folders
+
+    def _rows(self, folders, augment):
         # 클래스 이름 목록. 폴더를 넣은 순서 그대로다.
         tags = [name for name, _videos in folders]
         # 한 행이 1초 묶음의 특징 벡터. 영상 한 장당 한 행이 아니다.
@@ -135,9 +243,13 @@ class ModelStore:
                 # 1초 묶음마다 손가락 끝, 엄지·검지·중지 깊이, 굽은 각, 중지 10번 좌표를 한 줄로 넣는다.
                 # 15장 묶음을 5장씩 밀며 자른다. 1초보다 짧은 영상은 통째로 한 묶음이다.
                 for window in _sample_windows(path):
-                    # 원본과 사다리꼴 두 벌에, 각도·속도·흔들림을 같은 태그로 넣는다.
+                    # 원본, 위가 넓은 사다리꼴 두 벌, 아래가 넓은 사다리꼴 두 벌에 각도·속도·흔들림을 넣는다.
                     # 손이 거의 없으면 빈 목록이다. 모델 7까지는 이 과정이 없다.
-                    feats = self.analyzer.augmented_features(window)
+                    if augment:
+                        feats = self.analyzer.augmented_features(window)
+                    else:
+                        feat = self.analyzer.window_features(window)
+                        feats = [] if feat is None else [feat]
                     for feat in feats:
                         xs.append(feat)
                         ys.append(label)
@@ -241,6 +353,16 @@ class ModelStore:
         self.directory.mkdir(parents=True, exist_ok=True)
         text = json.dumps(catalog, ensure_ascii=False, indent=2) + "\n"
         self.catalog_path.write_text(text, encoding="utf-8")
+
+
+def _split_videos(paths, ratio=0.2):
+    """영상 목록에서 시험에 쓸 몫을 뺍니다. 최소 1개는 학습에 남깁니다."""
+    items = list(paths)
+    random.Random(0).shuffle(items)
+    hold = max(1, int(round(len(items) * ratio)))
+    if hold >= len(items):
+        hold = len(items) - 1
+    return items[hold:], items[:hold]
 
 
 # 학습 영상을 연속 1초 묶음으로 자른다. 15fps면 15장이 1초이고, 5장마다 다음 묶음을 만든다.

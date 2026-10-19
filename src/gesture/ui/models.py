@@ -1,7 +1,7 @@
 """등록 탭의 모델 목록과 학습 버튼."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QListWidgetItem
+from PySide6.QtWidgets import QApplication, QListWidgetItem, QMessageBox
 
 from gesture.model.labels import LabelSettings
 from gesture.model.store import ModelStore
@@ -21,7 +21,7 @@ class ModelPane:
             self.register_status.setText("녹화를 저장한 뒤 학습하세요.")
             return
         # 학습이 끝나는 동안 버튼을 다시 누르지 못하게 끈다.
-        self.train_button.setEnabled(False)
+        self._set_model_buttons(False)
         # 화면 아래에 학습이 시작됐다는 문구를 보여 준다.
         self.register_status.setText("학습 중...")
         # 위 문구가 학습 계산에 막히기 전에 화면에 그려지게 한다.
@@ -32,7 +32,7 @@ class ModelPane:
         except RuntimeError as exc:
             # 영상이 없거나 태그가 하나뿐이면 그 이유를 화면에 적고 버튼을 되돌린다.
             self.register_status.setText(str(exc))
-            self.train_button.setEnabled(True)
+            self._set_model_buttons(True)
             return
         # 방금 만든 모델을 인식 탭이 바로 쓰도록 불러온다.
         self._apply_record(record)
@@ -46,7 +46,29 @@ class ModelPane:
             f"{record['id']} 저장. 학습 영상 {record['video_count']}개{extra}"
         )
         # 다음 학습을 누를 수 있게 버튼을 다시 켠다.
-        self.train_button.setEnabled(True)
+        self._set_model_buttons(True)
+
+    def _score(self):
+        """태그마다 영상을 나눠 맞힌 비율을 보여 줍니다. 모델 파일은 만들지 않습니다."""
+        if self.recorder.recording:
+            self.register_status.setText("녹화를 저장한 뒤 인식률을 보세요.")
+            return
+        self._set_model_buttons(False)
+        self.register_status.setText("인식률 계산 중...")
+        QApplication.processEvents()
+        try:
+            report = self.model_store.evaluate()
+        except RuntimeError as exc:
+            self.register_status.setText(str(exc))
+            self._set_model_buttons(True)
+            return
+        self.register_status.setText(report["summary"])
+        QMessageBox.information(self.window, "인식률", report["detail"])
+        self._set_model_buttons(True)
+
+    def _set_model_buttons(self, enabled):
+        self.train_button.setEnabled(enabled)
+        self.score_button.setEnabled(enabled)
 
     def _reload_models(self):
         # 목록을 비우는 동안 선택 변경 신호가 인식을 바꾸지 않게 막는다.

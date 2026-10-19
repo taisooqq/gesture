@@ -82,8 +82,8 @@ class Settings:
         self.augment_speeds = (0.65, 1.4)
         self.augment_jitter = 0.02
         self.augment_jitter_copies = 2
-        # 화면 위쪽 가로를 이만큼 늘리고, 아래쪽 가로는 같은 만큼 줄인다. 원본 옆에 두 벌을 더한다.
-        self.augment_trapezoids = (0.05, 0.10)
+        # 양수는 위를 늘리고 아래를 줄인다. 음수는 위를 줄이고 아래를 늘린다.
+        self.augment_trapezoids = (0.05, 0.10, -0.05, -0.10)
         self.train_tag_ids = (
             "left_click_on",
             "left_click_off",

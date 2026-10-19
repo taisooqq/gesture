@@ -147,7 +147,7 @@ class HandAnalyzer:
         return self._tip_rows_joint10(valid, scale)
 
     def augmented_features(self, frames):
-        """학습용. 원본과 사다리꼴 두 벌에, 회전·속도·흔들림을 각각 붙입니다."""
+        """학습용. 원본과 사다리꼴 네 벌에, 회전·속도·흔들림을 각각 붙입니다."""
         valid, scale = self._valid_frames(frames)
         if valid is None:
             return []
@@ -172,7 +172,7 @@ class HandAnalyzer:
         return rows
 
     def _trapezoid_frames(self, valid, amount):
-        """화면 위쪽 가로를 늘리고 아래쪽 가로를 줄입니다. 세로는 그대로입니다."""
+        """가로만 사다리꼴로 바꿉니다. 양수는 위가 넓고, 음수는 아래가 넓습니다."""
         shaped = []
         for item in valid:
             joints = item["joints"].copy()
