@@ -39,7 +39,7 @@ class CameraPane:
                 self._show(cv2.flip(frame, 1))
         self._play_clip()
 
-    # 인식은 화면 전체를 본다. 중앙 초록 박스는 모니터 전체와 같은 비율이다.
+    # 인식은 화면 전체를 본다. 위쪽에 붙인 초록 박스는 모니터 전체와 같은 비율이다.
     # 커서를 클릭보다 먼저 옮긴다. 클릭을 먼저 보내면 검지가 내려간 다음 자리를 누르게 된다.
     def _show(self, frame):
         roi, record_box = self.analyzer.crop(frame)
@@ -47,7 +47,7 @@ class CameraPane:
         label, conf = self._gate(label, conf)
         # 인식 탭의 초록 박스는 포인터 영역이다. 등록 탭 네모는 녹화 영역이라 더 작다.
         if self.tabs.currentIndex() == 0:
-            box = self.analyzer.center_box(frame, self.settings.pointer_scale)
+            box = self.analyzer.top_box(frame, self.settings.pointer_scale)
         else:
             box = record_box
         self._aim(frame, box, label)
@@ -237,6 +237,8 @@ class CameraPane:
             self._click_held = False
         elif label == "right_click":
             ok = pointer.right_click()
+        elif label == "double_click":
+            ok = pointer.double_click()
         elif label in ("back", "forward", "refresh"):
             ok = pointer.browser(label)
         elif label == "screenshot":
@@ -254,7 +256,7 @@ class CameraPane:
         return "fail"
 
     _SCROLLS = {"scroll_up": 1, "scroll_down": -1}
-    _MOMENTARY = ("back", "forward", "refresh", "right_click", "screenshot")
+    _MOMENTARY = ("back", "forward", "refresh", "right_click", "double_click", "screenshot")
     _TIMED = {"left_click_on", "scroll_up", "scroll_down"}
     _NO_REFIRE = {"left_click_on", "left_click_off", "scroll_up", "scroll_down"}
 

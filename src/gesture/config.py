@@ -63,7 +63,7 @@ class Settings:
         self.min_hand_ratio = 0.03
         # 등록 녹화만 이 비율의 정중앙을 남긴다. 얼굴이 영상에 들어가지 않게 하려는 영역이다.
         self.roi_scale = 0.55
-        # 인식 탭의 초록 박스. 이 안 검지 끝이 모니터 전체다.
+        # 인식 탭의 초록 박스. 화면 위에 붙고, 이 안 검지 끝이 모니터 전체다.
         self.pointer_scale = 0.8
         self.data_dir = self.root / "data"
         self.video_dir = self.data_dir / "videos"
@@ -88,6 +88,7 @@ class Settings:
             "left_click_on",
             "left_click_off",
             "right_click",
+            "double_click",
             "back",
             "forward",
             "refresh",
@@ -99,6 +100,7 @@ class Settings:
             ("left_click_on", "마우스 좌클릭 누르기", "검지를 핀상태에서 엄지 접기"),
             ("left_click_off", "마우스 좌클릭 떼기", "접은 엄지 펴기"),
             ("right_click", "우클릭", "엄지와 검지를 제외한 나머지 손가락이 맞닿음"),
+            ("double_click", "더블클릭", "좌클릭 연속2번"),
             ("back", "뒤로가기", "손바닥을 세우고 오른쪽에서 왼쪽으로 움직임"),
             ("forward", "앞으로가기", "손바닥을 세우고 왼쪽에서 오른쪽으로 움직임"),
             ("refresh", "새로고침", "새끼손가락 올림"),

@@ -75,11 +75,11 @@ if sys.platform == "darwin":
     def _associate(enabled):
         _core.CGAssociateMouseAndMouseCursorPosition(bool(enabled))
 
-    def _post(point, event_type, button):
+    def _post(point, event_type, button, click_state=1):
         event = _core.CGEventCreateMouseEvent(None, event_type, point, button)
         if not event:
             return False
-        _core.CGEventSetIntegerValueField(event, _CLICK_STATE, 1)
+        _core.CGEventSetIntegerValueField(event, _CLICK_STATE, int(click_state))
         _core.CGEventPost(_HID, event)
         _foundation.CFRelease(event)
         return True
@@ -90,6 +90,10 @@ if sys.platform == "darwin":
             return _post(point, _LEFT_DOWN, _LEFT)
         if kind == "left_up":
             return _post(point, _LEFT_UP, _LEFT)
+        if kind == "double":
+            first = _post(point, _LEFT_DOWN, _LEFT, 1) and _post(point, _LEFT_UP, _LEFT, 1)
+            second = _post(point, _LEFT_DOWN, _LEFT, 2) and _post(point, _LEFT_UP, _LEFT, 2)
+            return first and second
         return _post(point, _RIGHT_DOWN, _RIGHT) and _post(point, _RIGHT_UP, _RIGHT)
 
     _core.CGEventCreateScrollWheelEvent.restype = c_void_p
@@ -327,6 +331,10 @@ elif sys.platform == "win32":
         }
         if kind == "right":
             return _click("right_down") and _click("right_up")
+        if kind == "double":
+            first = _click("left_down") and _click("left_up")
+            second = _click("left_down") and _click("left_up")
+            return first and second
         entry = _INPUT(type=_INPUT_MOUSE)
         entry.mi.dwFlags = flags[kind]
         return _send_input(entry)
@@ -480,6 +488,16 @@ def right_click():
     if not trusted():
         return False
     return _click("right")
+
+
+def double_click():
+    """포인터 위치에 왼쪽 버튼을 두 번 누릅니다."""
+    global _left_held
+    if not trusted():
+        return False
+    ok = _click("double")
+    _left_held = False
+    return ok
 
 
 def left_down():

@@ -34,6 +34,11 @@ class HandAnalyzer:
         y1 = (h - rh) // 2
         return x1, y1, rw, rh
 
+    def top_box(self, frame, scale):
+        """가로는 가운데, 세로는 화면 위에 붙인 네모를 돌려줍니다."""
+        x1, _y1, rw, rh = self.center_box(frame, scale)
+        return x1, 0, rw, rh
+
     def skin_mask(self, bgr):
         """예전 모델용. 피부색만 남긴 흑백 손 도장을 만듭니다."""
         ycrcb = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)
