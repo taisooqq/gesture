@@ -59,6 +59,11 @@ class ModelStore:
     def load(self, model_id):
         catalog = self._read_catalog()
         item = next(row for row in catalog["models"] if row["id"] == model_id)
+        if item.get("kind") == "cnn1d":
+            from gesture.model.cnn import load_sequence_model
+
+            model, tags, thresholds = load_sequence_model(self.directory / item["file"])
+            return model, tags, "cnn1d", thresholds
         blob = joblib.load(self.directory / item["file"])
         return blob["pipeline"], list(blob["tags"]), blob.get("features"), blob.get("thresholds") or {}
 
@@ -85,6 +90,27 @@ class ModelStore:
         # 위에서 만든 관절 숫자와 태그 이름을 랜덤 포레스트가 나눈다.
         pipeline.fit(features, labels)
         return self._save(pipeline, tags, videos, tag_counts, self._thresholds_for(tags))
+
+    def train_cnn(self):
+        """같은 학습 영상으로 1D CNN을 만듭니다. 랜덤포레스트 모델은 바꾸지 않습니다."""
+        try:
+            from gesture.model.cnn import save_sequence_model
+            from gesture.model.cnn import train_sequence_model
+        except ImportError as exc:
+            raise RuntimeError("1D CNN에는 torch가 필요합니다.") from exc
+        self.analyzer.use_static(True)
+        try:
+            samples = self._sequence_samples()
+        finally:
+            self.analyzer.use_static(False)
+        if samples is None:
+            raise RuntimeError("저장된 영상이 없습니다. 먼저 태그를 골라 녹화하세요.")
+        sequences, labels, tags, videos, tag_counts = samples
+        if len(tags) < 2:
+            raise RuntimeError("태그가 다른 영상이 2종류 이상 있어야 학습할 수 있습니다.")
+        network = train_sequence_model(sequences, labels, len(tags))
+        thresholds = self._thresholds_for(tags)
+        return self._save_cnn(network, tags, videos, tag_counts, thresholds, save_sequence_model)
 
     def evaluate(self):
         """태그마다 영상의 20%를 빼고 맞힌 비율을 계산합니다. 모델은 저장하지 않습니다."""
@@ -295,6 +321,50 @@ class ModelStore:
         # tags 는 클래스 이름, trained_videos 는 쓴 영상 경로, tag_counts 는 태그별 영상 수.
         return np.vstack(xs), np.array(ys), tags, trained_videos, tag_counts
 
+    def _sequence_samples(self):
+        folders = self._tagged_videos()
+        if folders is None:
+            return None
+        tags = [name for name, _videos in folders]
+        xs = []
+        ys = []
+        tag_counts = {name: 0 for name in tags}
+        used_by_tag = {name: [] for name in tags}
+        for label, (name, videos) in enumerate(folders):
+            for path in videos:
+                used = False
+                for window in _sample_windows(path):
+                    seqs = self.analyzer.augmented_sequences(window)
+                    for seq in seqs:
+                        xs.append(seq)
+                        ys.append(label)
+                    if seqs:
+                        used = True
+                if used:
+                    tag_counts[name] += 1
+                    used_by_tag[name].append(path.relative_to(self.settings.video_dir).as_posix())
+        tag_counts = {name: count for name, count in tag_counts.items() if count}
+        if not xs:
+            if self.analyzer.hands_error:
+                raise RuntimeError(self.analyzer.hands_error)
+            raise RuntimeError("영상에서 손을 찾지 못했습니다. 중앙 박스 안에서 다시 녹화하세요.")
+        tags = [name for name in tags if tag_counts.get(name)]
+        if len(tags) != len(folders):
+            kept = {name: index for index, name in enumerate(tags)}
+            old_names = [name for name, _videos in folders]
+            filtered_x = []
+            remapped = []
+            for seq, label in zip(xs, ys):
+                name = old_names[label]
+                if name in kept:
+                    filtered_x.append(seq)
+                    remapped.append(kept[name])
+            xs, ys = filtered_x, remapped
+        trained_videos = []
+        for name in tags:
+            trained_videos.extend(used_by_tag[name])
+        return np.stack(xs), np.array(ys), tags, trained_videos, tag_counts
+
     def _thresholds_for(self, tags):
         # 등록 화면의 점수는 다음 학습에 스냅샷으로 남는다. 이미 만든 모델은 바뀌지 않는다.
         saved = {tag["id"]: tag.get("threshold") for tag in TagStore(self.settings).load()}
@@ -321,6 +391,28 @@ class ModelStore:
         record = {
             "id": model_id,
             "file": filename,
+            "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "video_count": len(videos),
+            "videos": videos,
+            "tag_counts": tag_counts,
+            "augmented": True,
+            "thresholds": thresholds,
+        }
+        catalog["models"].append(record)
+        catalog["active"] = model_id
+        self._write_catalog(catalog)
+        return record
+
+    def _save_cnn(self, network, tags, videos, tag_counts, thresholds, save_model):
+        self.directory.mkdir(parents=True, exist_ok=True)
+        catalog = self._read_catalog()
+        model_id = self._next_id(catalog)
+        filename = f"{model_id}.pt"
+        save_model(self.directory / filename, network, tags, thresholds)
+        record = {
+            "id": model_id,
+            "file": filename,
+            "kind": "cnn1d",
             "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "video_count": len(videos),
             "videos": videos,

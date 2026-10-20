@@ -48,6 +48,28 @@ class ModelPane:
         # 다음 학습을 누를 수 있게 버튼을 다시 켠다.
         self._set_model_buttons(True)
 
+    def _train_cnn(self):
+        """같은 영상으로 1D CNN을 만들고 인식에 바로 적용합니다."""
+        if self.recorder.recording:
+            self.register_status.setText("녹화를 저장한 뒤 학습하세요.")
+            return
+        self._set_model_buttons(False)
+        self.register_status.setText("1D CNN 학습 중...")
+        QApplication.processEvents()
+        try:
+            record = self.model_store.train_cnn()
+        except RuntimeError as exc:
+            self.register_status.setText(str(exc))
+            self._set_model_buttons(True)
+            return
+        self._apply_record(record)
+        self._reload_models()
+        self._reload_clips(select=self.clip_path)
+        self.register_status.setText(
+            f"{record['id']} 저장. 학습 영상 {record['video_count']}개 · 1D CNN"
+        )
+        self._set_model_buttons(True)
+
     def _score(self):
         """태그마다 영상을 나눠 맞힌 비율을 보여 줍니다. 모델 파일은 만들지 않습니다."""
         if self.recorder.recording:
@@ -69,6 +91,7 @@ class ModelPane:
     def _set_model_buttons(self, enabled):
         self.train_button.setEnabled(enabled)
         self.score_button.setEnabled(enabled)
+        self.cnn_button.setEnabled(enabled)
 
     def _reload_models(self):
         # 목록을 비우는 동안 선택 변경 신호가 인식을 바꾸지 않게 막는다.
@@ -82,7 +105,10 @@ class ModelPane:
         # 저장된 모델을 만든 순서대로 한 줄씩 넣는다.
         for record in self.model_store.list_models():
             # 보이는 글자는 모델 이름과 학습 영상 개수다.
-            extra = " · 증강" if record.get("augmented") else ""
+            if record.get("kind") == "cnn1d":
+                extra = " · 1D CNN"
+            else:
+                extra = " · 증강" if record.get("augmented") else ""
             item = QListWidgetItem(f"{record['id']}    영상 {record['video_count']}개{extra}")
             # 줄을 눌렀을 때 찾을 모델 이름을 줄 안에 숨겨 둔다.
             item.setData(Qt.UserRole, record["id"])
@@ -116,12 +142,14 @@ class ModelPane:
         # 저장된 모델이 없으면 인식은 손 없음만 내도록 비운다.
         if record is None:
             self.model = None
+            self.model_kind = "forest"
             self.model_tags = []
             self.model_features = None
             self.smoother = GestureSmoother(self.settings)
             return
         # 모델 파일에서 분류기, 태그 순서, 좌표 종류를 읽는다.
         pipeline, tags, features, thresholds = self.model_store.load(record["id"])
+        self.model_kind = record.get("kind") or "forest"
         # 웹캠 판정이 이 분류기를 쓰게 한다.
         self.model = pipeline
         # 분류기 출력 순서를 태그 이름과 맞추기 위해 저장한다.

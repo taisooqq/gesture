@@ -162,6 +162,62 @@ class HandAnalyzer:
             rows.extend(self._augment_rows(shaped, self._frame_scale(shaped)))
         return rows
 
+    SEQUENCE_LENGTH = 15
+
+    def sequence_for(self, frames):
+        """프레임마다 손 좌표를 시간 순서로 쌓습니다. 길이는 15장으로 맞춥니다."""
+        valid, _scale = self._valid_frames(frames)
+        if valid is None:
+            return None
+        return self._sequence_from_valid(valid)
+
+    def augmented_sequences(self, frames):
+        """학습용. 원본과 사다리꼴에 회전·속도·흔들림을 붙인 좌표 시계열입니다."""
+        valid, scale = self._valid_frames(frames)
+        if valid is None:
+            return []
+        rows = self._sequence_copies(valid, scale)
+        for amount in self.settings.augment_trapezoids:
+            shaped = self._trapezoid_frames(valid, float(amount))
+            rows.extend(self._sequence_copies(shaped, self._frame_scale(shaped)))
+        return rows
+
+    def _sequence_copies(self, valid, scale):
+        """한 벌의 좌표에서 원본, 회전, 속도, 흔들림 시계열을 만듭니다."""
+        rows = [self._sequence_from_valid(valid)]
+        for degrees in self.settings.augment_rotations:
+            rows.append(self._sequence_from_valid(self._rotate_frames(valid, degrees)))
+        for speed in self.settings.augment_speeds:
+            rows.append(self._sequence_from_valid(self._warp_frames(valid, speed)))
+        rng = np.random.default_rng(self._augment_seed(valid))
+        for _copy in range(self.settings.augment_jitter_copies):
+            rows.append(self._sequence_from_valid(self._jitter_frames(valid, scale, rng)))
+        return rows
+
+    def _sequence_from_valid(self, valid):
+        """손 좌표 묶음을 15장 길이의 시계열로 맞춥니다."""
+        items = self._resample_valid(valid, self.SEQUENCE_LENGTH)
+        return np.stack([self._frame_vector(item) for item in items]).astype(np.float32)
+
+    def _resample_valid(self, valid, length):
+        """장 수가 달라도 같은 길이로 고릅니다."""
+        if len(valid) == length:
+            return valid
+        indexes = np.linspace(0, len(valid) - 1, num=length)
+        last = len(valid) - 1
+        return [valid[min(int(round(float(index))), last)] for index in indexes]
+
+    def _frame_vector(self, item):
+        """한 장의 관절을 손목 기준 좌표와 굽은 각으로 바꿉니다."""
+        scale = float(item["scale"]) + 1e-6
+        xy = (item["joints"] - item["wrist"]) / scale
+        depth = (item["depth"] - item["depth"][self._WRIST]) / scale
+        angles = np.array(
+            [self._bend_degrees(item["joints"], joint, left, right) / 180.0 for joint, left, right in self._BENDS],
+            dtype=np.float32,
+        )
+        return np.concatenate([xy.reshape(-1), depth.astype(np.float32), angles]).astype(np.float32)
+
     def _augment_rows(self, valid, scale):
         """한 벌의 좌표에서 원본, 회전, 속도, 흔들림 줄을 만듭니다."""
         rows = [self._tip_rows_joint10(valid, scale)]

@@ -130,21 +130,19 @@ class CameraPane:
         # 누르는 동안은 떼기만 최근 0.5초로 본다. 1초 창에는 접힌 자세가 남아 늦다.
         if getattr(self, "_press_wait", False):
             return self._predict_release(kind)
-        # 윤곽 숫자 8개 모델은 한 장만 본다. 관절 모델은 최근 1초가 모여야 한다.
-        single = kind not in HandAnalyzer.WINDOW_KINDS
+        # 누르기는 최근 8프레임만 본다. 다른 동작은 아래 1초 판단을 그대로 쓴다.
+        pressed = self._predict_press(kind)
+        if pressed is not None:
+            return pressed
+        # 윤곽 숫자 8개 모델은 한 장만 본다. 관절 모델과 1D CNN은 최근 1초가 모여야 한다.
+        single = kind not in HandAnalyzer.WINDOW_KINDS and getattr(self, "model_kind", "forest") != "cnn1d"
         if not single and now - self._recent_frames[0][0] < 0.8:
             return "idle", 0.0
         frames = [frame] if single else self._even_frames(15)
-        feat = self.analyzer.features_for(frames, kind)
-        expected = getattr(self.model, "n_features_in_", None)
-        if feat is None or (expected is not None and feat.shape[-1] != expected):
+        ordered = self._ordered_proba(frames)
+        if ordered is None:
             self.smoother.reset()
             return "idle", 0.0
-        # 판단
-        proba = self.model.predict_proba(feat.reshape(1, -1))[0]
-        ordered = np.zeros(len(self.model_tags), dtype=np.float64)
-        for index, cls in enumerate(self.model.classes_):
-            ordered[int(cls)] = proba[index]
         # 판단
         label, conf, _action, _fired = self.smoother.update(ordered)
         label = self._swipe_by_facing(frame, label)
@@ -161,6 +159,24 @@ class CameraPane:
             return label, conf
         return "idle", 0.0
 
+    def _predict_press(self, kind):
+        """최근 8프레임만 보고 누르기인지 판단합니다. 아니면 None입니다."""
+        seconds = self.settings.press_frames / self.settings.video_fps
+        frames = self._frames_within(seconds)
+        if len(frames) < self.settings.press_frames:
+            return None
+        if kind in HandAnalyzer.WINDOW_KINDS:
+            frames = self._sample_frames(frames, self.settings.press_frames)
+        else:
+            frames = frames[-1:]
+        scored = self._score_window(frames, "left_click_on")
+        if scored is None:
+            return None
+        conf, limit, chosen = scored
+        if chosen and conf >= limit:
+            return "left_click_on", conf
+        return None
+
     def _predict_release(self, kind):
         """누르기가 켜진 동안 최근 짧은 구간만 보고 떼기인지 판단합니다."""
         frames = self._frames_within(self.settings.release_seconds)
@@ -169,24 +185,45 @@ class CameraPane:
         else:
             frames = frames[-1:]
         held = getattr(self, "_click_conf", 0.0)
-        feat = self.analyzer.features_for(frames, kind) if frames else None
-        expected = getattr(self.model, "n_features_in_", None)
-        if feat is None or (expected is not None and feat.shape[-1] != expected):
+        scored = self._score_window(frames, "left_click_off")
+        if scored is None:
             return "left_click_on", held
-        if "left_click_off" not in self.model_tags:
-            return "left_click_on", held
-        proba = self.model.predict_proba(feat.reshape(1, -1))[0]
-        ordered = np.zeros(len(self.model_tags), dtype=np.float64)
-        for index, cls in enumerate(self.model.classes_):
-            ordered[int(cls)] = proba[index]
-        index = self.model_tags.index("left_click_off")
-        conf = float(ordered[index])
-        limits = getattr(self.smoother.settings, "thresholds", None)
-        limit = float(limits[index]) if limits is not None else self.settings.conf_threshold
-        if int(np.argmax(ordered)) == index and conf >= limit:
+        conf, limit, chosen = scored
+        if chosen and conf >= limit:
             self.smoother.reset()
             return "left_click_off", conf
         return "left_click_on", held
+
+    def _score_window(self, frames, name):
+        """짧은 화면에서 그 동작이 1등이고 기준점 이상인지 계산합니다."""
+        if not frames or name not in self.model_tags:
+            return None
+        ordered = self._ordered_proba(frames)
+        if ordered is None:
+            return None
+        index = self.model_tags.index(name)
+        limits = getattr(self.smoother.settings, "thresholds", None)
+        limit = float(limits[index]) if limits is not None else self.settings.conf_threshold
+        return float(ordered[index]), limit, int(np.argmax(ordered)) == index
+
+    def _ordered_proba(self, frames):
+        """고른 화면을 현재 모델의 동작 점수로 바꿉니다."""
+        if getattr(self, "model_kind", "forest") == "cnn1d":
+            seq = self.analyzer.sequence_for(frames)
+            if seq is None:
+                return None
+            proba = self.model.predict_proba(seq)
+        else:
+            kind = getattr(self, "model_features", None)
+            feat = self.analyzer.features_for(frames, kind)
+            expected = getattr(self.model, "n_features_in_", None)
+            if feat is None or (expected is not None and feat.shape[-1] != expected):
+                return None
+            proba = self.model.predict_proba(feat.reshape(1, -1))[0]
+        ordered = np.zeros(len(self.model_tags), dtype=np.float64)
+        for index, cls in enumerate(self.model.classes_):
+            ordered[int(cls)] = proba[index]
+        return ordered
 
     # 모델이 고른 스와이프를 다른 쪽으로 바꾸지 않는다.
     # 뒤로가기는 모델이 뒤로가기이고 중지 끝 x가 -1 이하일 때만 나간다.

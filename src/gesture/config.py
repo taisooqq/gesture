@@ -46,6 +46,8 @@ class Settings:
         self.motion_tags = ("back", "forward")
         # 스크롤 자세가 유지되는 동안 휠을 보내는 간격.
         self.scroll_interval = 0.08
+        # 좌클릭 누르기만 최근 이 프레임으로 본다. 15fps면 10장은 약 0.67초다.
+        self.press_frames = 10
         # 좌클릭을 누른 뒤 떼기만 최근 이 시간으로 본다.
         # 1초 창에는 접힌 자세가 남아 떼기가 늦다.
         self.release_seconds = 0.5

@@ -4,3 +4,4 @@ numpy>=1.26,<2
 scikit-learn
 joblib
 PySide6
+torch

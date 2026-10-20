@@ -79,6 +79,8 @@ class TagPane:
         self.train_button.setEnabled(not busy)
         if hasattr(self, "score_button"):
             self.score_button.setEnabled(not busy)
+        if hasattr(self, "cnn_button"):
+            self.cnn_button.setEnabled(not busy)
         if hasattr(self, "delete_clip_button"):
             self.delete_clip_button.setEnabled(self.clip_path is not None and not busy)
 
