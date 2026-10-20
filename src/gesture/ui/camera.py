@@ -447,13 +447,13 @@ class CameraPane:
 
     # 초록 박스 안 검지 끝은 모니터의 같은 비율 위치다. 박스 왼쪽 위는 화면 왼쪽 위다.
     # 손이 없으면 커서를 더 옮기지 않는다. 트랙패드로 마우스를 움직이게 하려고다.
-    # 좌클릭 누르기 순간 검지 끝을 고정한다. 엄지를 접으며 검지가 움직이면
-    # 클릭 위치가 밀리기 때문이다. 떼기 전까지는 손목이 움직인 만큼만 옮긴다.
-    # 이 함수는 클릭을 보내기 전에 호출된다. 클릭이 기억해 둔 자리에서 나가게 하려고다.
+    # 좌클릭 누르기가 인식되면 0.3초 동안 커서를 멈춘다.
+    # 0.3초가 지나면 그때의 검지 끝으로 옮기고, 그 뒤는 손목만큼만 움직인다.
+    # 이 함수는 클릭을 보내기 전에 호출된다.
     def _aim(self, frame, box, label):
         """초록 박스 안 검지 끝을 모니터의 같은 위치로 옮깁니다."""
         if self.tabs.currentIndex() != 0 or not self.live_button.isChecked():
-            self._aim_lock = None
+            self._clear_aim()
             pointer.release_cursor()
             return
         if not pointer.trusted():
@@ -461,28 +461,42 @@ class CameraPane:
             return
         points = self.analyzer.pointing(frame)
         if points is None:
-            self._aim_lock = None
+            self._clear_aim()
             pointer.release_cursor()
             return
         pointer.arm_cursor()
         tip_x, tip_y, wrist_x, wrist_y = points
         # 가리킬 때는 검지 끝이 모니터의 그 자리다.
-        # 누르기 모션이거나 버튼이 이미 눌린 동안만 그 자리의 검지를 고정하고 손목만큼 옮긴다.
+        # 누르기가 막 인식되면 0.3초 동안 커서를 멈추고, 그 순간 검지 끝으로 옮긴다.
         locked = label == "left_click_on" or getattr(self, "_click_held", False)
         x, y, width, height = box
+        now = time.perf_counter()
         if locked:
+            if not getattr(self, "_press_frozen", False):
+                self._press_frozen = True
+                self._press_still_until = now + self.settings.press_still_seconds
+                self._aim_lock = None
+            if now < getattr(self, "_press_still_until", 0.0):
+                return
             if getattr(self, "_aim_lock", None) is None:
                 self._aim_lock = (tip_x, tip_y, wrist_x, wrist_y)
             lock_x, lock_y, lock_wrist_x, lock_wrist_y = self._aim_lock
             place_x = lock_x + (wrist_x - lock_wrist_x)
             place_y = lock_y + (wrist_y - lock_wrist_y)
         else:
+            self._press_frozen = False
             self._aim_lock = None
             place_x, place_y = tip_x, tip_y
+        self._aim_place = (place_x, place_y)
         rel_x = min(1.0, max(0.0, (place_x - x) / width))
         rel_y = min(1.0, max(0.0, (place_y - y) / height))
         if not pointer.move_ratio(rel_x, rel_y):
             self._control_note = "손쉬운 사용 권한이 필요합니다"
+
+    def _clear_aim(self):
+        """누르기 고정과 커서 멈춤을 해제합니다."""
+        self._aim_lock = None
+        self._press_frozen = False
 
     def _frames_within(self, seconds):
         """최근 몇 초 안의 화면만 고릅니다."""

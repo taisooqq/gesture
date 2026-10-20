@@ -48,6 +48,8 @@ class Settings:
         self.scroll_interval = 0.08
         # 좌클릭 누르기만 최근 이 프레임으로 본다. 15fps면 10장은 약 0.67초다.
         self.press_frames = 10
+        # 누르기가 인식된 뒤 이 시간 동안은 커서를 움직이지 않는다.
+        self.press_still_seconds = 0.3
         # 좌클릭을 누른 뒤 떼기만 최근 이 시간으로 본다.
         # 1초 창에는 접힌 자세가 남아 떼기가 늦다.
         self.release_seconds = 0.5
