@@ -162,10 +162,8 @@ class HandAnalyzer:
             rows.extend(self._augment_rows(shaped, self._frame_scale(shaped)))
         return rows
 
-    SEQUENCE_LENGTH = 15
-
     def sequence_for(self, frames):
-        """프레임마다 손 좌표를 시간 순서로 쌓습니다. 길이는 15장으로 맞춥니다."""
+        """프레임마다 손 좌표를 시간 순서로 쌓습니다. 손 있는 장 수 그대로입니다."""
         valid, _scale = self._valid_frames(frames)
         if valid is None:
             return None
@@ -195,17 +193,8 @@ class HandAnalyzer:
         return rows
 
     def _sequence_from_valid(self, valid):
-        """손 좌표 묶음을 15장 길이의 시계열로 맞춥니다."""
-        items = self._resample_valid(valid, self.SEQUENCE_LENGTH)
-        return np.stack([self._frame_vector(item) for item in items]).astype(np.float32)
-
-    def _resample_valid(self, valid, length):
-        """장 수가 달라도 같은 길이로 고릅니다."""
-        if len(valid) == length:
-            return valid
-        indexes = np.linspace(0, len(valid) - 1, num=length)
-        last = len(valid) - 1
-        return [valid[min(int(round(float(index))), last)] for index in indexes]
+        """손 있는 장을 순서대로 쌓습니다. 장 수를 늘리거나 줄이지 않습니다."""
+        return np.stack([self._frame_vector(item) for item in valid]).astype(np.float32)
 
     def _frame_vector(self, item):
         """한 장의 관절을 손목 기준 좌표와 굽은 각으로 바꿉니다."""

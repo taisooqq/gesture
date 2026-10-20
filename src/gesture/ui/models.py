@@ -70,6 +70,24 @@ class ModelPane:
         )
         self._set_model_buttons(True)
 
+    def _score_cnn(self):
+        """1D CNN으로 영상을 나눠 맞힌 비율을 보여 줍니다. 모델 파일은 만들지 않습니다."""
+        if self.recorder.recording:
+            self.register_status.setText("녹화를 저장한 뒤 인식률을 보세요.")
+            return
+        self._set_model_buttons(False)
+        self.register_status.setText("1D CNN 인식률 계산 중...")
+        QApplication.processEvents()
+        try:
+            report = self.model_store.evaluate_cnn()
+        except RuntimeError as exc:
+            self.register_status.setText(str(exc))
+            self._set_model_buttons(True)
+            return
+        self.register_status.setText(report["summary"])
+        QMessageBox.information(self.window, "1D CNN 인식률", report["detail"])
+        self._set_model_buttons(True)
+
     def _score(self):
         """태그마다 영상을 나눠 맞힌 비율을 보여 줍니다. 모델 파일은 만들지 않습니다."""
         if self.recorder.recording:
@@ -92,6 +110,7 @@ class ModelPane:
         self.train_button.setEnabled(enabled)
         self.score_button.setEnabled(enabled)
         self.cnn_button.setEnabled(enabled)
+        self.cnn_score_button.setEnabled(enabled)
 
     def _reload_models(self):
         # 목록을 비우는 동안 선택 변경 신호가 인식을 바꾸지 않게 막는다.

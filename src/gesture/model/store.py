@@ -150,6 +150,64 @@ class ModelStore:
         )
         pipeline.fit(features, labels)
         thresholds = self._thresholds_for(tags)
+        return self._score_windows(
+            tags,
+            thresholds,
+            test_groups,
+            skipped,
+            self.analyzer.window_features,
+            lambda feat: self._guess(pipeline, tags, thresholds, feat),
+        )
+
+    def evaluate_cnn(self):
+        """1D CNN으로 태그마다 영상의 20%를 빼고 맞힌 비율을 계산합니다. 모델은 저장하지 않습니다."""
+        try:
+            from gesture.model.cnn import SequenceClassifier
+            from gesture.model.cnn import train_sequence_model
+        except ImportError as exc:
+            raise RuntimeError("1D CNN에는 torch가 필요합니다.") from exc
+        self.analyzer.use_static(True)
+        try:
+            return self._evaluate_cnn(train_sequence_model, SequenceClassifier)
+        finally:
+            self.analyzer.use_static(False)
+
+    def _evaluate_cnn(self, train_sequence_model, sequence_classifier):
+        folders = self._tagged_videos()
+        if folders is None:
+            raise RuntimeError("저장된 영상이 없습니다. 먼저 태그를 골라 녹화하세요.")
+        train_groups = []
+        test_groups = []
+        skipped = []
+        for name, videos in folders:
+            if len(videos) < 2:
+                skipped.append(name)
+                continue
+            train_paths, test_paths = _split_videos(videos)
+            train_groups.append((name, train_paths))
+            test_groups.append((name, test_paths))
+        if len(train_groups) < 2:
+            raise RuntimeError("인식률을 보려면 영상이 2개 이상인 태그가 2종류 있어야 합니다.")
+        trained = self._sequence_samples(train_groups)
+        if trained is None:
+            raise RuntimeError("학습으로 쓸 영상에서 손을 찾지 못했습니다.")
+        sequences, labels, tags, _videos, _counts = trained
+        if len(tags) < 2:
+            raise RuntimeError("손이 잡힌 태그가 2종류 이상 있어야 인식률을 볼 수 있습니다.")
+        network = train_sequence_model(sequences, labels, len(tags))
+        model = sequence_classifier(network, tags)
+        thresholds = self._thresholds_for(tags)
+        return self._score_windows(
+            tags,
+            thresholds,
+            test_groups,
+            skipped,
+            self.analyzer.sequence_for,
+            lambda seq: self._guess_sequence(model, tags, thresholds, seq),
+        )
+
+    def _score_windows(self, tags, thresholds, test_groups, skipped, read_window, guess):
+        """시험 영상을 증강 없이 맞춰 보고, 태그별 비율을 만듭니다."""
         titles = {tag["id"]: tag["title"] for tag in TagStore(self.settings).load()}
         totals = {name: 0 for name in tags}
         hits = {name: 0 for name in tags}
@@ -163,16 +221,16 @@ class ModelStore:
             for path in videos:
                 used = False
                 for window in _sample_windows(path):
-                    feat = self.analyzer.window_features(window)
+                    feat = read_window(window)
                     if feat is None:
                         continue
                     used = True
                     totals[name] += 1
-                    guess = self._guess(pipeline, tags, thresholds, feat)
-                    if guess == name:
+                    predicted = guess(feat)
+                    if predicted == name:
                         hits[name] += 1
                     else:
-                        confused[name][guess] = confused[name].get(guess, 0) + 1
+                        confused[name][predicted] = confused[name].get(predicted, 0) + 1
                 if used:
                     test_videos += 1
         for name in tags:
@@ -192,8 +250,8 @@ class ModelStore:
             wrong = sorted(confused[name].items(), key=lambda item: item[1], reverse=True)
             if wrong:
                 parts = []
-                for guess, count in wrong:
-                    label = "무동작" if guess is None else titles.get(guess, guess)
+                for other, count in wrong:
+                    label = "무동작" if other is None else titles.get(other, other)
                     parts.append(f"{label} {count}")
                 lines.append("  다른 판정: " + ", ".join(parts))
         if skipped:
@@ -206,6 +264,15 @@ class ModelStore:
         proba = pipeline.predict_proba(feat.reshape(1, -1))[0]
         index = int(np.argmax(proba))
         name = tags[int(pipeline.classes_[index])]
+        if float(proba[index]) < thresholds.get(name, self.settings.conf_threshold):
+            return None
+        return name
+
+    def _guess_sequence(self, model, tags, thresholds, sequence):
+        """1D CNN 점수가 기준점 미만이면 무동작입니다."""
+        proba = model.predict_proba(sequence)
+        index = int(np.argmax(proba))
+        name = tags[int(model.classes_[index])]
         if float(proba[index]) < thresholds.get(name, self.settings.conf_threshold):
             return None
         return name
@@ -321,10 +388,11 @@ class ModelStore:
         # tags 는 클래스 이름, trained_videos 는 쓴 영상 경로, tag_counts 는 태그별 영상 수.
         return np.vstack(xs), np.array(ys), tags, trained_videos, tag_counts
 
-    def _sequence_samples(self):
-        folders = self._tagged_videos()
+    def _sequence_samples(self, folders=None):
         if folders is None:
-            return None
+            folders = self._tagged_videos()
+            if folders is None:
+                return None
         tags = [name for name, _videos in folders]
         xs = []
         ys = []
@@ -363,7 +431,7 @@ class ModelStore:
         trained_videos = []
         for name in tags:
             trained_videos.extend(used_by_tag[name])
-        return np.stack(xs), np.array(ys), tags, trained_videos, tag_counts
+        return xs, np.array(ys), tags, trained_videos, tag_counts
 
     def _thresholds_for(self, tags):
         # 등록 화면의 점수는 다음 학습에 스냅샷으로 남는다. 이미 만든 모델은 바뀌지 않는다.

@@ -130,7 +130,7 @@ class CameraPane:
         # 누르는 동안은 떼기만 최근 0.5초로 본다. 1초 창에는 접힌 자세가 남아 늦다.
         if getattr(self, "_press_wait", False):
             return self._predict_release(kind)
-        # 누르기는 최근 8프레임만 본다. 다른 동작은 아래 1초 판단을 그대로 쓴다.
+        # 누르기는 최근 10프레임만 본다. 다른 동작은 아래 1초 판단을 그대로 쓴다.
         pressed = self._predict_press(kind)
         if pressed is not None:
             return pressed
@@ -160,12 +160,12 @@ class CameraPane:
         return "idle", 0.0
 
     def _predict_press(self, kind):
-        """최근 8프레임만 보고 누르기인지 판단합니다. 아니면 None입니다."""
+        """최근 10프레임만 보고 누르기인지 판단합니다. 아니면 None입니다."""
         seconds = self.settings.press_frames / self.settings.video_fps
         frames = self._frames_within(seconds)
         if len(frames) < self.settings.press_frames:
             return None
-        if kind in HandAnalyzer.WINDOW_KINDS:
+        if self._uses_frame_window(kind):
             frames = self._sample_frames(frames, self.settings.press_frames)
         else:
             frames = frames[-1:]
@@ -180,7 +180,7 @@ class CameraPane:
     def _predict_release(self, kind):
         """누르기가 켜진 동안 최근 짧은 구간만 보고 떼기인지 판단합니다."""
         frames = self._frames_within(self.settings.release_seconds)
-        if kind in HandAnalyzer.WINDOW_KINDS:
+        if self._uses_frame_window(kind):
             frames = self._sample_frames(frames, 15)
         else:
             frames = frames[-1:]
@@ -193,6 +193,12 @@ class CameraPane:
             self.smoother.reset()
             return "left_click_off", conf
         return "left_click_on", held
+
+    def _uses_frame_window(self, kind):
+        """여러 장을 보는 모델인지 확인합니다. 1D CNN도 여기 포함됩니다."""
+        if getattr(self, "model_kind", "forest") == "cnn1d":
+            return True
+        return kind in HandAnalyzer.WINDOW_KINDS
 
     def _score_window(self, frames, name):
         """짧은 화면에서 그 동작이 1등이고 기준점 이상인지 계산합니다."""

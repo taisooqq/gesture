@@ -24,34 +24,58 @@ class SequenceClassifier:
 
 
 def train_sequence_model(sequences, labels, class_count):
-    """좌표 시계열로 작은 1D CNN을 맞춥니다."""
+    """좌표 시계열로 작은 1D CNN을 맞춥니다. 길이가 다른 영상은 빈 칸으로 채웁니다."""
     import torch
     from torch import nn
 
-    features = int(sequences.shape[-1])
+    items = _as_sequences(sequences)
+    features = int(items[0].shape[-1])
     network = _Network(features, class_count)
     device = _device()
     network.to(device)
-    counts = np.bincount(labels, minlength=class_count).astype(np.float32)
+    ys = np.asarray(labels, dtype=np.int64)
+    counts = np.bincount(ys, minlength=class_count).astype(np.float32)
     weights = torch.tensor(counts.sum() / np.maximum(counts, 1.0), dtype=torch.float32, device=device)
     loss_fn = nn.CrossEntropyLoss(weight=weights)
     optimizer = torch.optim.Adam(network.parameters(), lr=1e-3)
-    xs = torch.from_numpy(np.asarray(sequences, dtype=np.float32))
-    ys = torch.from_numpy(np.asarray(labels, dtype=np.int64))
     batch = 128
     network.train()
     for _epoch in range(20):
-        order = torch.randperm(xs.shape[0])
-        for start in range(0, xs.shape[0], batch):
-            chosen = order[start : start + batch]
+        order = torch.randperm(len(items))
+        for start in range(0, len(items), batch):
+            chosen = order[start : start + batch].tolist()
+            padded, lengths = _pad([items[index] for index in chosen])
+            target = torch.from_numpy(ys[chosen])
             optimizer.zero_grad()
-            logits = network(xs[chosen].to(device))
-            loss = loss_fn(logits, ys[chosen].to(device))
+            logits = network(padded.to(device), lengths.to(device))
+            loss = loss_fn(logits, target.to(device))
             loss.backward()
             optimizer.step()
     network.to("cpu")
     network.eval()
     return network
+
+
+def _as_sequences(sequences):
+    """길이별로 쌓인 배열이거나, 이미 같은 길이로 묶인 배열을 목록으로 바꿉니다."""
+    if isinstance(sequences, np.ndarray) and sequences.ndim == 3:
+        return [sequences[index] for index in range(sequences.shape[0])]
+    return [np.asarray(item, dtype=np.float32) for item in sequences]
+
+
+def _pad(items):
+    """짧은 시계열 뒤를 0으로 채워 한 묶음으로 만듭니다."""
+    import torch
+
+    width = max(int(item.shape[0]) for item in items)
+    features = int(items[0].shape[-1])
+    padded = torch.zeros((len(items), width, features), dtype=torch.float32)
+    lengths = torch.zeros(len(items), dtype=torch.int64)
+    for index, item in enumerate(items):
+        tensor = torch.from_numpy(np.asarray(item, dtype=np.float32))
+        padded[index, : tensor.shape[0]] = tensor
+        lengths[index] = tensor.shape[0]
+    return padded, lengths
 
 
 def save_sequence_model(path, network, tags, thresholds):
@@ -106,13 +130,21 @@ class _Network:
                     nn.ReLU(),
                     nn.Conv1d(64, 64, kernel_size=3, padding=1),
                     nn.ReLU(),
-                    nn.AdaptiveAvgPool1d(1),
                 )
                 self.fc = nn.Linear(64, class_count)
 
-            def forward(self, sequence):
+            def forward(self, sequence, lengths=None):
                 # (묶음, 시간, 좌표) 를 (묶음, 좌표, 시간) 으로 두고 시간을 따라 봅니다.
-                hidden = self.net(sequence.transpose(1, 2)).squeeze(-1)
-                return self.fc(hidden)
+                # 짧은 영상 뒤의 빈 칸은 평균에서 뺍니다.
+                hidden = self.net(sequence.transpose(1, 2))
+                if lengths is None:
+                    pooled = hidden.mean(dim=-1)
+                else:
+                    steps = hidden.shape[-1]
+                    index = torch.arange(steps, device=hidden.device)
+                    mask = (index.unsqueeze(0) < lengths.unsqueeze(1)).unsqueeze(1)
+                    denom = lengths.clamp(min=1).to(hidden.dtype).unsqueeze(1)
+                    pooled = (hidden * mask.to(hidden.dtype)).sum(dim=-1) / denom
+                return self.fc(pooled)
 
         return Network()
