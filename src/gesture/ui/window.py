@@ -258,7 +258,6 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         self._saved_image_min = self.recognize_image.minimumHeight()
         self.recognize_image.setMinimumHeight(120)
         self.window.setMinimumSize(640, 240)
-        self.window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
         screen = self.window.screen().availableGeometry()
         width = min(760, screen.width() - 24)
         height = 280
@@ -273,7 +272,6 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         if not self._compact:
             return
         self._compact = False
-        self.window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False)
         self.recognize_image.setMinimumHeight(self._saved_image_min)
         self.window.setMinimumSize(self._saved_min_size)
         self.window.show()

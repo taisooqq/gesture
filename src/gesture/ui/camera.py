@@ -471,6 +471,11 @@ class CameraPane:
         locked = label == "left_click_on" or getattr(self, "_click_held", False)
         x, y, width, height = box
         now = time.perf_counter()
+        # 0.3초 안에 떼기가 오면 누르기 자리에서 버튼을 놓는다. 검지 끝으로 옮기지 않는다.
+        if label == "left_click_off" and now < getattr(self, "_press_still_until", 0.0):
+            self._press_frozen = False
+            self._aim_lock = None
+            return
         if locked:
             if not getattr(self, "_press_frozen", False):
                 self._press_frozen = True
