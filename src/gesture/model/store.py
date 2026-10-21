@@ -204,9 +204,10 @@ class ModelStore:
             skipped,
             self.analyzer.sequence_for,
             lambda seq: self._guess_sequence(model, tags, thresholds, seq),
+            whole=True,
         )
 
-    def _score_windows(self, tags, thresholds, test_groups, skipped, read_window, guess):
+    def _score_windows(self, tags, thresholds, test_groups, skipped, read_window, guess, whole=False):
         """시험 영상을 증강 없이 맞춰 보고, 태그별 비율을 만듭니다."""
         titles = {tag["id"]: tag["title"] for tag in TagStore(self.settings).load()}
         totals = {name: 0 for name in tags}
@@ -218,9 +219,10 @@ class ModelStore:
             if name not in kept:
                 skipped.append(name)
                 continue
+            clips = _whole_clip if whole else _sample_windows
             for path in videos:
                 used = False
-                for window in _sample_windows(path):
+                for window in clips(path):
                     feat = read_window(window)
                     if feat is None:
                         continue
@@ -400,15 +402,14 @@ class ModelStore:
         used_by_tag = {name: [] for name in tags}
         for label, (name, videos) in enumerate(folders):
             for path in videos:
-                used = False
-                for window in _sample_windows(path):
-                    seqs = self.analyzer.augmented_sequences(window)
-                    for seq in seqs:
-                        xs.append(seq)
-                        ys.append(label)
-                    if seqs:
-                        used = True
-                if used:
+                frames = _read_frames(path)
+                if not frames:
+                    continue
+                seqs = self.analyzer.augmented_sequences(frames)
+                for seq in seqs:
+                    xs.append(seq)
+                    ys.append(label)
+                if seqs:
                     tag_counts[name] += 1
                     used_by_tag[name].append(path.relative_to(self.settings.video_dir).as_posix())
         tag_counts = {name: count for name, count in tag_counts.items() if count}
@@ -525,8 +526,8 @@ def _split_videos(paths, ratio=0.2):
     return items[hold:], items[:hold]
 
 
-# 학습 영상을 연속 1초 묶음으로 자른다. 15fps면 15장이 1초이고, 5장마다 다음 묶음을 만든다.
-def _sample_windows(path, length=15, stride=5):
+def _read_frames(path):
+    """영상 프레임을 앞에서부터 모두 읽습니다."""
     cap = open_video(path)
     frames = []
     while True:
@@ -535,6 +536,19 @@ def _sample_windows(path, length=15, stride=5):
             break
         frames.append(frame)
     cap.release()
+    return frames
+
+
+def _whole_clip(path):
+    """1D CNN용. 영상을 자르지 않고 한 묶음으로 넘깁니다."""
+    frames = _read_frames(path)
+    if frames:
+        yield frames
+
+
+# 랜덤포레스트는 연속 1초 묶음으로 자른다. 15fps면 15장이 1초이고, 5장마다 다음 묶음을 만든다.
+def _sample_windows(path, length=15, stride=5):
+    frames = _read_frames(path)
     if len(frames) < length:
         if frames:
             yield frames

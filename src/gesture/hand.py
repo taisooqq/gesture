@@ -111,12 +111,14 @@ class HandAnalyzer:
 
     # 학습 숫자는 여기다. 인식은 camera.py _predict 가 features_for 로 같은 숫자를 만든다.
     # 손목을 원점으로 두고, 다섯 손가락 끝만 쓴다. 엄지, 검지, 중지, 약지, 새끼 순이다.
-    # 끝마다 x, y, dx, dy. x, y는 손목을 뺀 위치, dx, dy는 1초 동안 그 끝이 손목 기준으로 움직인 양이다.
+    # 장마다 x, y와 이전 장과의 dx, dy를 넣는다. 첫 장의 변화는 0이다.
     # 손 크기는 손목에서 중지 뿌리까지로 나눈다.
-    # 지금 학습은 여기에 엄지, 검지, 중지 끝의 z, dz, 손가락마다 굽은 각,
-    # 그리고 중지 10번 관절의 x, y, z 를 더한다. 좌클릭은 엄지가 이 관절에 닿는다.
-    FEATURE_KIND = "fingertips_joint10"
+    # 엄지, 검지, 중지 끝의 z, dz, 손가락마다 굽은 각과 각 변화,
+    # 중지 10번 관절의 x, y, z와 그 변화를 더한다. 15장보다 짧으면 뒤를 0으로 채운다.
+    FEATURE_KIND = "fingertips_joint10_step"
+    STEP_FRAMES = 15
     WINDOW_KINDS = (
+        "fingertips_joint10_step",
         "fingertips_joint10",
         "fingertips_angle",
         "fingertips_z",
@@ -145,11 +147,11 @@ class HandAnalyzer:
             self._hands = None
 
     def window_features(self, frames):
-        """1초 묶음을 다섯 손가락 끝의 위치와 이동으로 바꿉니다. 손이 거의 없으면 None입니다."""
+        """프레임마다 위치와 이전 장과의 변화를 한 줄로 잇습니다. 손이 거의 없으면 None입니다."""
         valid, scale = self._valid_frames(frames)
         if valid is None:
             return None
-        return self._tip_rows_joint10(valid, scale)
+        return self._step_rows(valid, scale)
 
     def augmented_features(self, frames):
         """학습용. 원본과 사다리꼴 네 벌에, 회전·속도·흔들림을 각각 붙입니다."""
@@ -209,16 +211,16 @@ class HandAnalyzer:
 
     def _augment_rows(self, valid, scale):
         """한 벌의 좌표에서 원본, 회전, 속도, 흔들림 줄을 만듭니다."""
-        rows = [self._tip_rows_joint10(valid, scale)]
+        rows = [self._step_rows(valid, scale)]
         for degrees in self.settings.augment_rotations:
-            rows.append(self._tip_rows_joint10(self._rotate_frames(valid, degrees), scale))
+            rows.append(self._step_rows(self._rotate_frames(valid, degrees), scale))
         for speed in self.settings.augment_speeds:
             warped = self._warp_frames(valid, speed)
-            rows.append(self._tip_rows_joint10(warped, self._frame_scale(warped)))
+            rows.append(self._step_rows(warped, self._frame_scale(warped)))
         rng = np.random.default_rng(self._augment_seed(valid))
         for _copy in range(self.settings.augment_jitter_copies):
             shaken = self._jitter_frames(valid, scale, rng)
-            rows.append(self._tip_rows_joint10(shaken, self._frame_scale(shaken)))
+            rows.append(self._step_rows(shaken, self._frame_scale(shaken)))
         return rows
 
     def _trapezoid_frames(self, valid, amount):
@@ -300,6 +302,39 @@ class HandAnalyzer:
         cosine = float(np.dot(before, after) / (length_before * length_after))
         cosine = min(1.0, max(-1.0, cosine))
         return float(np.degrees(np.arccos(cosine)))
+
+    def _step_rows(self, valid, scale):
+        """손 있는 장마다 그 자세와, 바로 이전 장에서 변한 양을 붙입니다. 15장보다 짧으면 뒤를 0으로 채웁니다."""
+        items = valid[-self.STEP_FRAMES :]
+        rows = [self._frame_step(item, prev, scale) for prev, item in zip([None, *items], items)]
+        flat = np.concatenate(rows).astype(np.float32)
+        missing = self.STEP_FRAMES - len(rows)
+        if missing <= 0:
+            return flat
+        return np.concatenate([flat, np.zeros(missing * rows[0].shape[0], dtype=np.float32)])
+
+    def _frame_step(self, item, prev, scale):
+        """한 장의 끝 좌표, 깊이, 굽은 각과 이전 장과의 차이입니다. 첫 장의 차이는 0입니다."""
+        parts = []
+        for tip in self._TIPS:
+            xy = (item["joints"][tip] - item["wrist"]) / scale
+            delta = np.zeros(2, dtype=np.float32) if prev is None else xy - (prev["joints"][tip] - prev["wrist"]) / scale
+            parts.append(np.concatenate([xy, delta]))
+        for tip in self._Z_TIPS:
+            z = (item["depth"][tip] - item["depth"][self._WRIST]) / scale
+            dz = 0.0 if prev is None else z - (prev["depth"][tip] - prev["depth"][self._WRIST]) / scale
+            parts.append(np.array([z, dz], dtype=np.float32))
+        for joint, left, right in self._BENDS:
+            angle = self._bend_degrees(item["joints"], joint, left, right)
+            change = 0.0 if prev is None else angle - self._bend_degrees(prev["joints"], joint, left, right)
+            parts.append(np.array([angle, change], dtype=np.float32))
+        index = self._MIDDLE_PIP
+        xy = (item["joints"][index] - item["wrist"]) / scale
+        delta = np.zeros(2, dtype=np.float32) if prev is None else xy - (prev["joints"][index] - prev["wrist"]) / scale
+        z = (item["depth"][index] - item["depth"][self._WRIST]) / scale
+        dz = 0.0 if prev is None else z - (prev["depth"][index] - prev["depth"][self._WRIST]) / scale
+        parts.append(np.concatenate([xy, delta, np.array([z, dz], dtype=np.float32)]))
+        return np.concatenate(parts).astype(np.float32)
 
     def _tip_rows(self, valid, scale):
         """손목 기준 다섯 손가락 끝의 중간 위치와 처음에서 끝까지의 이동."""
@@ -478,6 +513,12 @@ class HandAnalyzer:
         # 위치, 깊이, 굽은 각, 중지 10번. 지금 학습 버튼이 만든다.
         if kind == self.FEATURE_KIND:
             return self.window_features(frames)
+        # 묶음 전체의 중간값과 첫·끝 차이. 이번에 바꾸기 전에 학습한 모델이다.
+        if kind == "fingertips_joint10":
+            valid, scale = self._valid_frames(frames)
+            if valid is None:
+                return None
+            return self._tip_rows_joint10(valid, scale)
         # 10번 없는 모델. 14번부터 17번까지다.
         if kind == "fingertips_angle":
             valid, scale = self._valid_frames(frames)
