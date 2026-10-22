@@ -153,9 +153,20 @@ class HandAnalyzer:
             return None
         return self._step_rows(valid, scale)
 
+    def window_features_points(self, points):
+        """이미 찾은 손 좌표로 window_features 와 같은 줄을 만듭니다."""
+        valid, scale = self._valid_points(points)
+        if valid is None:
+            return None
+        return self._step_rows(valid, scale)
+
     def augmented_features(self, frames):
         """학습용. 원본과 사다리꼴 네 벌에, 회전·속도·흔들림을 각각 붙입니다."""
-        valid, scale = self._valid_frames(frames)
+        return self.augmented_features_points([self._finger_points(frame) for frame in frames])
+
+    def augmented_features_points(self, points):
+        """이미 찾은 손 좌표로 augmented_features 와 같은 줄들을 만듭니다."""
+        valid, scale = self._valid_points(points)
         if valid is None:
             return []
         rows = self._augment_rows(valid, scale)
@@ -499,10 +510,12 @@ class HandAnalyzer:
 
     def _valid_frames(self, frames):
         """손이 잡힌 장면과 손 크기를 고릅니다. 너무 적으면 (None, None)입니다."""
-        points = [self._finger_points(frame) for frame in frames]
+        return self._valid_points([self._finger_points(frame) for frame in frames])
+
+    def _valid_points(self, points):
         valid = [item for item in points if item is not None]
         # 1초가 안 되는 영상은 손이 한 장이라도 있으면 넣는다.
-        need = 1 if len(frames) < 8 else max(3, len(frames) // 2)
+        need = 1 if len(points) < 8 else max(3, len(points) // 2)
         if len(valid) < need:
             return None, None
         scale = float(np.median([item["scale"] for item in valid])) + 1e-6

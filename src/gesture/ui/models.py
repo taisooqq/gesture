@@ -49,15 +49,15 @@ class ModelPane:
         self._set_model_buttons(True)
 
     def _train_cnn(self):
-        """같은 영상으로 1D CNN을 만들고 인식에 바로 적용합니다."""
+        """같은 영상으로 딥러닝 모델을 만들고 인식에 바로 적용합니다."""
         if self.recorder.recording:
             self.register_status.setText("녹화를 저장한 뒤 학습하세요.")
             return
         self._set_model_buttons(False)
-        self.register_status.setText("1D CNN 학습 중...")
+        self.register_status.setText("딥러닝 학습 중... 처음에는 영상마다 손 좌표를 뽑습니다.")
         QApplication.processEvents()
         try:
-            record = self.model_store.train_cnn()
+            record = self.model_store.train_motion()
         except RuntimeError as exc:
             self.register_status.setText(str(exc))
             self._set_model_buttons(True)
@@ -66,26 +66,26 @@ class ModelPane:
         self._reload_models()
         self._reload_clips(select=self.clip_path)
         self.register_status.setText(
-            f"{record['id']} 저장. 학습 영상 {record['video_count']}개 · 1D CNN"
+            f"{record['id']} 저장. 학습 영상 {record['video_count']}개 · 딥러닝"
         )
         self._set_model_buttons(True)
 
     def _score_cnn(self):
-        """1D CNN으로 영상을 나눠 맞힌 비율을 보여 줍니다. 모델 파일은 만들지 않습니다."""
+        """딥러닝으로 영상을 나눠 맞힌 비율을 보여 줍니다. 모델 파일은 만들지 않습니다."""
         if self.recorder.recording:
             self.register_status.setText("녹화를 저장한 뒤 인식률을 보세요.")
             return
         self._set_model_buttons(False)
-        self.register_status.setText("1D CNN 인식률 계산 중...")
+        self.register_status.setText("딥러닝 인식률 계산 중...")
         QApplication.processEvents()
         try:
-            report = self.model_store.evaluate_cnn()
+            report = self.model_store.evaluate_motion()
         except RuntimeError as exc:
             self.register_status.setText(str(exc))
             self._set_model_buttons(True)
             return
         self.register_status.setText(report["summary"])
-        QMessageBox.information(self.window, "1D CNN 인식률", report["detail"])
+        QMessageBox.information(self.window, "딥러닝 인식률", report["detail"])
         self._set_model_buttons(True)
 
     def _score(self):
@@ -124,7 +124,9 @@ class ModelPane:
         # 저장된 모델을 만든 순서대로 한 줄씩 넣는다.
         for record in self.model_store.list_models():
             # 보이는 글자는 모델 이름과 학습 영상 개수다.
-            if record.get("kind") == "cnn1d":
+            if record.get("kind") == "motion":
+                extra = " · 딥러닝"
+            elif record.get("kind") == "cnn1d":
                 extra = " · 1D CNN"
             else:
                 extra = " · 증강" if record.get("augmented") else ""

@@ -126,6 +126,8 @@ class CameraPane:
             self._pinch_low = None
             self.smoother.reset()
             return "none", 0.0
+        if getattr(self, "model_kind", "forest") == "motion":
+            return self._predict_motion(frame, now)
         kind = getattr(self, "model_features", None)
         # 누르는 동안은 떼기만 최근 0.5초로 본다. 1초 창에는 접힌 자세가 남아 늦다.
         if getattr(self, "_press_wait", False):
@@ -158,6 +160,58 @@ class CameraPane:
         if label not in ("none", "idle"):
             return label, conf
         return "idle", 0.0
+
+    # 딥러닝은 학습과 같이 최근 1초를 15fps로 골라 한 번에 본다.
+    # 마지막으로 동작이 나간 뒤의 장만 쓴다. 누르기에 쓴 접기 장면으로 다시 누르지 않는다.
+    # 누르기·떼기는 그 장의 점수로 바로 정하고, 나머지는 이어진 점수(EMA)로 정한다.
+    def _predict_motion(self, frame, now):
+        """딥러닝 모델로 최근 화면을 판단합니다."""
+        from gesture.model.sequence import live_features
+
+        since = max(now - 1.0, getattr(self, "_consumed_at", 0.0))
+        stamped = [(stamp, item) for stamp, item in self._recent_frames if stamp >= since]
+        frames = _frames_at_fps(stamped, self.settings.video_fps, self.settings.seq_window)
+        points = [self.analyzer.landmarks(item) for item in frames]
+        waiting = getattr(self, "_press_wait", False)
+        held = getattr(self, "_click_conf", 0.0)
+        if sum(item is not None for item in points) < self.settings.seq_min_frames:
+            return ("left_click_on", held) if waiting else ("idle", 0.0)
+        height, width = frame.shape[:2]
+        proba = self.model.predict_proba(live_features(points, width / height))
+        ordered = np.zeros(len(self.model_tags), dtype=np.float64)
+        for index, cls in enumerate(self.model.classes_):
+            ordered[int(cls)] = proba[index]
+        best = int(np.argmax(ordered))
+        name = self.model_tags[best]
+        conf = float(ordered[best])
+        limits = getattr(self.smoother.settings, "thresholds", None)
+        limit = float(limits[best]) if limits is not None else self.settings.conf_threshold
+        if waiting:
+            if name == "left_click_off" and conf >= limit:
+                self.smoother.reset()
+                return name, conf
+            return "left_click_on", held
+        if name == "left_click_on" and conf >= limit:
+            return name, conf
+        label, conf, _action, _fired = self.smoother.update(ordered)
+        if label in ("left_click_on", "left_click_off", "idle"):
+            return "idle", 0.0
+        label = self._swipe_by_facing(frame, label)
+        if label in self.settings.motion_tags:
+            motion = self.analyzer.tip_motion(self._frames_within(self.settings.idle_seconds))
+            if motion is None or motion < self.settings.idle_motion:
+                return "idle", 0.0
+        if label not in ("none", "idle"):
+            return label, conf
+        return "idle", 0.0
+
+    def _consume(self, label, now):
+        """딥러닝은 동작이 나가면 그 전 장을 다음 판단에서 뺍니다."""
+        if getattr(self, "model_kind", "forest") != "motion":
+            return
+        if label in ("left_click_on", "left_click_off") or label in self._MOMENTARY:
+            self._consumed_at = now
+            self.smoother.reset()
 
     def _predict_press(self, kind):
         """최근 10프레임만 보고 누르기인지 판단합니다. 아니면 None입니다."""
@@ -278,6 +332,7 @@ class CameraPane:
                 return "echo"
             self._sent_label = label
             self._blocked = None
+            self._consume(label, now)
             return "off"
         if label == "none":
             self._release_click()
@@ -298,6 +353,7 @@ class CameraPane:
             return "echo"
         self._blocked = None
         self._sent_label = label
+        self._consume(label, now)
         if label in self._MOMENTARY:
             self._lock_until = now + self.settings.refire_seconds
             self._lock_label = label
@@ -521,3 +577,19 @@ class CameraPane:
             return frames
         indexes = np.linspace(0, len(frames) - 1, num=count, dtype=int)
         return [frames[int(index)] for index in indexes]
+
+
+def _frames_at_fps(stamped, fps, count):
+    """(시각, 화면) 목록에서 녹화와 같은 간격으로 최근 count 장을 고릅니다. 카메라가 30fps여도 15fps 간격입니다."""
+    step = 1.0 / float(fps)
+    picked = []
+    limit = None
+    for stamp, frame in reversed(stamped):
+        if limit is not None and stamp > limit:
+            continue
+        picked.append(frame)
+        if len(picked) >= count:
+            break
+        limit = stamp - 0.75 * step
+    picked.reverse()
+    return picked

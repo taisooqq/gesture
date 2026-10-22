@@ -5,7 +5,6 @@ import random
 import re
 from datetime import datetime
 
-import cv2
 import joblib
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
@@ -14,7 +13,7 @@ from sklearn.preprocessing import StandardScaler
 
 from gesture.config import settings as default_settings
 from gesture.hand import HandAnalyzer
-from gesture.recorder import open_video
+from gesture.model.landmarks import video_points
 from gesture.tags import TagStore
 
 
@@ -59,6 +58,11 @@ class ModelStore:
     def load(self, model_id):
         catalog = self._read_catalog()
         item = next(row for row in catalog["models"] if row["id"] == model_id)
+        if item.get("kind") == "motion":
+            from gesture.model.sequence import load_motion_model
+
+            model, tags, thresholds = load_motion_model(self.directory / item["file"])
+            return model, tags, "motion", thresholds
         if item.get("kind") == "cnn1d":
             from gesture.model.cnn import load_sequence_model
 
@@ -67,112 +71,97 @@ class ModelStore:
         blob = joblib.load(self.directory / item["file"])
         return blob["pipeline"], list(blob["tags"]), blob.get("features"), blob.get("thresholds") or {}
 
-
     # 학습
     def train(self):
-        # 학습 영상은 앞 장면의 손을 기억하면 다음 영상의 좌표가 달라진다.
-        self.analyzer.use_static(True)
-        try:
-            samples = self._samples()
-        finally:
-            self.analyzer.use_static(False)
+        samples = self._samples()
         if samples is None:
             raise RuntimeError("저장된 영상이 없습니다. 먼저 태그를 골라 녹화하세요.")
         features, labels, tags, videos, tag_counts = samples
         if len(tags) < 2:
             raise RuntimeError("태그가 다른 영상이 2종류 이상 있어야 학습할 수 있습니다.")
-        pipeline = Pipeline(
-            [
-                ("scaler", StandardScaler()),
-                ("clf", RandomForestClassifier(n_estimators=200, random_state=0)),
-            ]
-        )
+        pipeline = _forest()
         # 위에서 만든 관절 숫자와 태그 이름을 랜덤 포레스트가 나눈다.
         pipeline.fit(features, labels)
         return self._save(pipeline, tags, videos, tag_counts, self._thresholds_for(tags))
 
-    def train_cnn(self):
-        """같은 학습 영상으로 1D CNN을 만듭니다. 랜덤포레스트 모델은 바꾸지 않습니다."""
-        try:
-            from gesture.model.cnn import save_sequence_model
-            from gesture.model.cnn import train_sequence_model
-        except ImportError as exc:
-            raise RuntimeError("1D CNN에는 torch가 필요합니다.") from exc
-        self.analyzer.use_static(True)
-        try:
-            samples = self._sequence_samples()
-        finally:
-            self.analyzer.use_static(False)
-        if samples is None:
-            raise RuntimeError("저장된 영상이 없습니다. 먼저 태그를 골라 녹화하세요.")
-        sequences, labels, tags, videos, tag_counts = samples
-        if len(tags) < 2:
-            raise RuntimeError("태그가 다른 영상이 2종류 이상 있어야 학습할 수 있습니다.")
-        network = train_sequence_model(sequences, labels, len(tags))
-        thresholds = self._thresholds_for(tags)
-        return self._save_cnn(network, tags, videos, tag_counts, thresholds, save_sequence_model)
-
-    def evaluate(self):
-        """태그마다 영상의 20%를 빼고 맞힌 비율을 계산합니다. 모델은 저장하지 않습니다."""
-        self.analyzer.use_static(True)
-        try:
-            return self._evaluate()
-        finally:
-            self.analyzer.use_static(False)
-
-    def _evaluate(self):
+    def train_motion(self):
+        """같은 학습 영상으로 딥러닝 모델을 만듭니다. 랜덤포레스트 모델은 바꾸지 않습니다."""
+        train_motion_model, save_motion_model = _torch_parts()
         folders = self._tagged_videos()
         if folders is None:
             raise RuntimeError("저장된 영상이 없습니다. 먼저 태그를 골라 녹화하세요.")
-        train_groups = []
-        test_groups = []
-        skipped = []
-        for name, videos in folders:
-            if len(videos) < 2:
-                skipped.append(name)
-                continue
-            train_paths, test_paths = _split_videos(videos)
-            train_groups.append((name, train_paths))
-            test_groups.append((name, test_paths))
-        if len(train_groups) < 2:
-            raise RuntimeError("인식률을 보려면 영상이 2개 이상인 태그가 2종류 있어야 합니다.")
+        clips, tags, videos, tag_counts = self._motion_clips(folders)
+        model = train_motion_model([clip[:5] for clip in clips], tags, self.settings)
+        thresholds = self._thresholds_for(tags)
+        return self._save_motion(model, videos, tag_counts, thresholds, save_motion_model)
+
+    def evaluate(self):
+        """태그마다 영상의 20%를 빼고 맞힌 비율을 계산합니다. 모델은 저장하지 않습니다."""
+        train_groups, test_groups, skipped = self._split_folders()
         trained = self._rows(train_groups, augment=True)
         if trained is None:
             raise RuntimeError("학습으로 쓸 영상에서 손을 찾지 못했습니다.")
         features, labels, tags, _videos, _counts = trained
         if len(tags) < 2:
             raise RuntimeError("손이 잡힌 태그가 2종류 이상 있어야 인식률을 볼 수 있습니다.")
-        pipeline = Pipeline(
-            [
-                ("scaler", StandardScaler()),
-                ("clf", RandomForestClassifier(n_estimators=200, random_state=0)),
-            ]
-        )
+        pipeline = _forest()
         pipeline.fit(features, labels)
         thresholds = self._thresholds_for(tags)
-        return self._score_windows(
-            tags,
-            thresholds,
-            test_groups,
-            skipped,
-            self.analyzer.window_features,
-            lambda feat: self._guess(pipeline, tags, thresholds, feat),
-        )
+        tests = []
+        for name, videos in test_groups:
+            points = video_points(self.settings, videos)
+            per_video = []
+            for path in videos:
+                frames, _aspect = points[path]
+                feats = [self.analyzer.window_features_points(window) for window in _windows(frames)]
+                per_video.append([feat for feat in feats if feat is not None])
+            tests.append((name, per_video))
 
-    def evaluate_cnn(self):
-        """1D CNN으로 태그마다 영상의 20%를 빼고 맞힌 비율을 계산합니다. 모델은 저장하지 않습니다."""
-        try:
-            from gesture.model.cnn import SequenceClassifier
-            from gesture.model.cnn import train_sequence_model
-        except ImportError as exc:
-            raise RuntimeError("1D CNN에는 torch가 필요합니다.") from exc
-        self.analyzer.use_static(True)
-        try:
-            return self._evaluate_cnn(train_sequence_model, SequenceClassifier)
-        finally:
-            self.analyzer.use_static(False)
+        def guess(feat):
+            proba = pipeline.predict_proba(feat.reshape(1, -1))[0]
+            return self._guess(proba, pipeline.classes_, tags, thresholds)
 
-    def _evaluate_cnn(self, train_sequence_model, sequence_classifier):
+        return self._score_report(tags, tests, skipped, guess)
+
+    def evaluate_motion(self):
+        """딥러닝으로 태그마다 영상의 20%를 빼고 맞힌 비율을 계산합니다. 모델은 저장하지 않습니다."""
+        from gesture.model.motion import features
+
+        train_motion_model, _save = _torch_parts()
+        train_groups, test_groups, skipped = self._split_folders()
+        clips, tags, _videos, _counts = self._motion_clips(train_groups)
+        model = train_motion_model([clip[:5] for clip in clips], tags, self.settings)
+        thresholds = self._thresholds_for(tags)
+
+        def guess(sequence):
+            return self._guess(model.predict_proba(sequence), model.classes_, tags, thresholds)
+
+        test_folders = [(name, videos) for name, videos in test_groups if name in tags]
+        skipped.extend(name for name, _videos in test_groups if name not in tags)
+        test_clips, _tags, _used, _counts = self._motion_clips(test_folders, tags=tags, allow_short=True)
+        tests = {}
+        held = [0, 0]
+        rng = np.random.default_rng(1)
+        for label, joints, depth, aspect, moving, video in test_clips:
+            tests.setdefault(tags[label], {}).setdefault(video, []).append(features(joints, depth, aspect))
+            if not moving:
+                continue
+            # 움직여야 하는 동작의 처음·끝 자세로 멈춘 손은 무동작이어야 한다.
+            for index in (0, joints.shape[0] - 1):
+                still_j = np.repeat(joints[index : index + 1], self.settings.seq_window, axis=0)
+                still_d = np.repeat(depth[index : index + 1], self.settings.seq_window, axis=0)
+                scale = float(np.linalg.norm(joints[index, 9] - joints[index, 0]))
+                still_j = still_j + rng.normal(0.0, 0.01 * scale, size=still_j.shape).astype(np.float32)
+                held[1] += 1
+                if guess(features(still_j, still_d, aspect)) in (None, "idle"):
+                    held[0] += 1
+        grouped = [(name, list(videos.values())) for name, videos in tests.items()]
+        extra = None
+        if held[1]:
+            extra = f"멈춘 손을 무동작으로 본 비율 {round(100 * held[0] / held[1])}%  {held[0]}/{held[1]}"
+        return self._score_report([name for name in tags if name != "idle"], grouped, skipped, guess, extra)
+
+    def _split_folders(self):
         folders = self._tagged_videos()
         if folders is None:
             raise RuntimeError("저장된 영상이 없습니다. 먼저 태그를 골라 녹화하세요.")
@@ -188,53 +177,34 @@ class ModelStore:
             test_groups.append((name, test_paths))
         if len(train_groups) < 2:
             raise RuntimeError("인식률을 보려면 영상이 2개 이상인 태그가 2종류 있어야 합니다.")
-        trained = self._sequence_samples(train_groups)
-        if trained is None:
-            raise RuntimeError("학습으로 쓸 영상에서 손을 찾지 못했습니다.")
-        sequences, labels, tags, _videos, _counts = trained
-        if len(tags) < 2:
-            raise RuntimeError("손이 잡힌 태그가 2종류 이상 있어야 인식률을 볼 수 있습니다.")
-        network = train_sequence_model(sequences, labels, len(tags))
-        model = sequence_classifier(network, tags)
-        thresholds = self._thresholds_for(tags)
-        return self._score_windows(
-            tags,
-            thresholds,
-            test_groups,
-            skipped,
-            self.analyzer.sequence_for,
-            lambda seq: self._guess_sequence(model, tags, thresholds, seq),
-            whole=True,
-        )
+        return train_groups, test_groups, skipped
 
-    def _score_windows(self, tags, thresholds, test_groups, skipped, read_window, guess, whole=False):
-        """시험 영상을 증강 없이 맞춰 보고, 태그별 비율을 만듭니다."""
+    def _score_report(self, tags, tests, skipped, guess, extra=None):
+        """시험 영상을 증강 없이 맞춰 보고, 태그별 비율을 만듭니다. tests 는 (태그, 영상별 묶음 목록) 입니다."""
         titles = {tag["id"]: tag["title"] for tag in TagStore(self.settings).load()}
+        titles.setdefault("idle", "무동작")
         totals = {name: 0 for name in tags}
         hits = {name: 0 for name in tags}
         confused = {name: {} for name in tags}
         test_videos = 0
         kept = set(tags)
-        for name, videos in test_groups:
+        for name, per_video in tests:
             if name not in kept:
                 skipped.append(name)
                 continue
-            clips = _whole_clip if whole else _sample_windows
-            for path in videos:
-                used = False
-                for window in clips(path):
-                    feat = read_window(window)
-                    if feat is None:
-                        continue
-                    used = True
+            for feats in per_video:
+                if not feats:
+                    continue
+                test_videos += 1
+                for feat in feats:
                     totals[name] += 1
                     predicted = guess(feat)
+                    if predicted == "idle":
+                        predicted = None
                     if predicted == name:
                         hits[name] += 1
                     else:
                         confused[name][predicted] = confused[name].get(predicted, 0) + 1
-                if used:
-                    test_videos += 1
         for name in tags:
             if totals[name] == 0 and name not in skipped:
                 skipped.append(name)
@@ -243,7 +213,10 @@ class ModelStore:
             raise RuntimeError("시험 영상에서 손을 찾지 못했습니다.")
         hit = sum(hits.values())
         summary = f"전체 {round(100 * hit / total)}%  시험 묶음 {total}개, 영상 {test_videos}개"
-        lines = [summary, ""]
+        lines = [summary]
+        if extra:
+            lines.append(extra)
+        lines.append("")
         for name in tags:
             if totals[name] == 0:
                 continue
@@ -253,28 +226,20 @@ class ModelStore:
             if wrong:
                 parts = []
                 for other, count in wrong:
-                    label = "무동작" if other is None else titles.get(other, other)
+                    label = "무동작" if other in (None, "idle") else titles.get(other, other)
                     parts.append(f"{label} {count}")
                 lines.append("  다른 판정: " + ", ".join(parts))
         if skipped:
-            names = ", ".join(titles.get(name, name) for name in skipped)
+            names = ", ".join(titles.get(name, name) for name in dict.fromkeys(skipped))
             lines.extend(["", f"영상이 적거나 손을 못 찾아 빼 둠: {names}"])
+        if extra:
+            summary = f"{summary} · {extra.split('  ')[0]}"
         return {"summary": summary, "detail": "\n".join(lines)}
 
-    def _guess(self, pipeline, tags, thresholds, feat):
+    def _guess(self, proba, classes, tags, thresholds):
         """기준점 미만이면 무동작입니다. 무동작은 None 으로 돌려줍니다."""
-        proba = pipeline.predict_proba(feat.reshape(1, -1))[0]
         index = int(np.argmax(proba))
-        name = tags[int(pipeline.classes_[index])]
-        if float(proba[index]) < thresholds.get(name, self.settings.conf_threshold):
-            return None
-        return name
-
-    def _guess_sequence(self, model, tags, thresholds, sequence):
-        """1D CNN 점수가 기준점 미만이면 무동작입니다."""
-        proba = model.predict_proba(sequence)
-        index = int(np.argmax(proba))
-        name = tags[int(model.classes_[index])]
+        name = tags[int(classes[index])]
         if float(proba[index]) < thresholds.get(name, self.settings.conf_threshold):
             return None
         return name
@@ -329,21 +294,24 @@ class ModelStore:
         tag_counts = {name: 0 for name in tags}
         # 태그별로 실제로 학습에 쓴 영상 경로. 카탈로그 videos 필드에 남긴다.
         used_by_tag = {name: [] for name in tags}
+        # 영상마다 손 좌표는 한 번만 뽑아 data/landmarks 에 둔다. 처음에는 코어마다 나눠 뽑는다.
+        points = video_points(self.settings, [path for _name, videos in folders for path in videos])
         # enumerate 의 번호가 그 태그의 클래스 번호다.
         for label, (name, videos) in enumerate(folders):
             for path in videos:
                 # 이 영상에서 손을 찾은 1초 묶음이 하나라도 있으면 True.
                 used = False
+                frames, _aspect = points[path]
                 # 학습 입력은 hand.py 의 window_features 다.
                 # 1초 묶음마다 손가락 끝, 엄지·검지·중지 깊이, 굽은 각, 중지 10번 좌표를 한 줄로 넣는다.
                 # 15장 묶음을 5장씩 밀며 자른다. 1초보다 짧은 영상은 통째로 한 묶음이다.
-                for window in _sample_windows(path):
+                for window in _windows(frames):
                     # 원본, 위가 넓은 사다리꼴 두 벌, 아래가 넓은 사다리꼴 두 벌에 각도·속도·흔들림을 넣는다.
                     # 손이 거의 없으면 빈 목록이다. 모델 7까지는 이 과정이 없다.
                     if augment:
-                        feats = self.analyzer.augmented_features(window)
+                        feats = self.analyzer.augmented_features_points(window)
                     else:
-                        feat = self.analyzer.window_features(window)
+                        feat = self.analyzer.window_features_points(window)
                         feats = [] if feat is None else [feat]
                     for feat in feats:
                         xs.append(feat)
@@ -390,49 +358,49 @@ class ModelStore:
         # tags 는 클래스 이름, trained_videos 는 쓴 영상 경로, tag_counts 는 태그별 영상 수.
         return np.vstack(xs), np.array(ys), tags, trained_videos, tag_counts
 
-    def _sequence_samples(self, folders=None):
-        if folders is None:
-            folders = self._tagged_videos()
-            if folders is None:
-                return None
-        tags = [name for name, _videos in folders]
-        xs = []
-        ys = []
-        tag_counts = {name: 0 for name in tags}
-        used_by_tag = {name: [] for name in tags}
-        for label, (name, videos) in enumerate(folders):
+    def _motion_clips(self, folders, tags=None, allow_short=False):
+        """딥러닝 학습 묶음. 인식과 같은 1초(15장) 창이고, 끝 묶음은 영상 끝에 맞춥니다.
+
+        돌려주는 묶음은 (태그 번호, 관절, 깊이, 화면 비율, 움직이는 동작인지, 영상 경로) 입니다.
+        움직여야 하는 동작이 있으면 태그 끝에 무동작(idle)을 둡니다.
+        """
+        from gesture.model.motion import stack_points, windows
+
+        points = video_points(self.settings, [path for _name, videos in folders for path in videos])
+        window = int(self.settings.seq_window)
+        need = int(self.settings.seq_min_frames)
+        moving_tags = set(self.settings.moving_tags)
+        found = []
+        used_by_tag = {}
+        for name, videos in folders:
             for path in videos:
-                frames = _read_frames(path)
-                if not frames:
-                    continue
-                seqs = self.analyzer.augmented_sequences(frames)
-                for seq in seqs:
-                    xs.append(seq)
-                    ys.append(label)
-                if seqs:
-                    tag_counts[name] += 1
-                    used_by_tag[name].append(path.relative_to(self.settings.video_dir).as_posix())
-        tag_counts = {name: count for name, count in tag_counts.items() if count}
-        if not xs:
-            if self.analyzer.hands_error:
-                raise RuntimeError(self.analyzer.hands_error)
+                frames, aspect = points[path]
+                kept = False
+                for part in windows(frames, window):
+                    joints, depth = stack_points(part)
+                    if joints is None or (joints.shape[0] < need and not allow_short):
+                        continue
+                    found.append((name, joints, depth, aspect, name in moving_tags, path))
+                    kept = True
+                if kept:
+                    used_by_tag.setdefault(name, []).append(path.relative_to(self.settings.video_dir).as_posix())
+        if tags is None:
+            tags = [name for name, _videos in folders if name in used_by_tag]
+            if any(name in moving_tags for name in tags):
+                tags.append("idle")
+        if not found:
             raise RuntimeError("영상에서 손을 찾지 못했습니다. 중앙 박스 안에서 다시 녹화하세요.")
-        tags = [name for name in tags if tag_counts.get(name)]
-        if len(tags) != len(folders):
-            kept = {name: index for index, name in enumerate(tags)}
-            old_names = [name for name, _videos in folders]
-            filtered_x = []
-            remapped = []
-            for seq, label in zip(xs, ys):
-                name = old_names[label]
-                if name in kept:
-                    filtered_x.append(seq)
-                    remapped.append(kept[name])
-            xs, ys = filtered_x, remapped
-        trained_videos = []
-        for name in tags:
-            trained_videos.extend(used_by_tag[name])
-        return xs, np.array(ys), tags, trained_videos, tag_counts
+        if len([name for name in tags if name != "idle"]) < 2:
+            raise RuntimeError("손이 잡힌 태그가 2종류 이상 있어야 학습할 수 있습니다.")
+        index = {name: number for number, name in enumerate(tags)}
+        clips = [
+            (index[name], joints, depth, aspect, moving, path)
+            for name, joints, depth, aspect, moving, path in found
+            if name in index
+        ]
+        videos = [video for name in tags for video in used_by_tag.get(name, [])]
+        tag_counts = {name: len(used_by_tag[name]) for name in tags if name in used_by_tag}
+        return clips, tags, videos, tag_counts
 
     def _thresholds_for(self, tags):
         # 등록 화면의 점수는 다음 학습에 스냅샷으로 남는다. 이미 만든 모델은 바뀌지 않는다.
@@ -472,16 +440,16 @@ class ModelStore:
         self._write_catalog(catalog)
         return record
 
-    def _save_cnn(self, network, tags, videos, tag_counts, thresholds, save_model):
+    def _save_motion(self, model, videos, tag_counts, thresholds, save_model):
         self.directory.mkdir(parents=True, exist_ok=True)
         catalog = self._read_catalog()
         model_id = self._next_id(catalog)
         filename = f"{model_id}.pt"
-        save_model(self.directory / filename, network, tags, thresholds)
+        save_model(self.directory / filename, model, thresholds)
         record = {
             "id": model_id,
             "file": filename,
-            "kind": "cnn1d",
+            "kind": "motion",
             "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "video_count": len(videos),
             "videos": videos,
@@ -526,32 +494,25 @@ def _split_videos(paths, ratio=0.2):
     return items[hold:], items[:hold]
 
 
-def _read_frames(path):
-    """영상 프레임을 앞에서부터 모두 읽습니다."""
-    cap = open_video(path)
-    frames = []
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        frames.append(frame)
-    cap.release()
-    return frames
+def _forest():
+    return Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            ("clf", RandomForestClassifier(n_estimators=200, random_state=0, n_jobs=-1)),
+        ]
+    )
 
 
-def _whole_clip(path):
-    """1D CNN용. 영상을 자르지 않고 한 묶음으로 넘깁니다."""
-    frames = _read_frames(path)
-    if frames:
-        yield frames
+def _torch_parts():
+    try:
+        from gesture.model.sequence import save_motion_model, train_motion_model
+    except ImportError as exc:
+        raise RuntimeError("딥러닝에는 torch가 필요합니다.") from exc
+    return train_motion_model, save_motion_model
 
 
 # 랜덤포레스트는 연속 1초 묶음으로 자른다. 15fps면 15장이 1초이고, 5장마다 다음 묶음을 만든다.
-def _sample_windows(path, length=15, stride=5):
-    frames = _read_frames(path)
+def _windows(frames, length=15, stride=5):
     if len(frames) < length:
-        if frames:
-            yield frames
-        return
-    for start in range(0, len(frames) - length + 1, stride):
-        yield frames[start : start + length]
+        return [frames] if frames else []
+    return [frames[start : start + length] for start in range(0, len(frames) - length + 1, stride)]

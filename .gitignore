@@ -46,5 +46,6 @@ env/
 # Project
 data/**/*.png
 data/**/*.avi
+data/landmarks/
 
 CLAUDE.md

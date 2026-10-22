@@ -74,6 +74,10 @@ class Settings:
         self.pointer_scale = 0.8
         self.data_dir = self.root / "data"
         self.video_dir = self.data_dir / "videos"
+        # 영상마다 한 번 뽑은 손 좌표. 영상이 바뀌면 다시 뽑는다.
+        self.landmark_dir = self.data_dir / "landmarks"
+        # 손 좌표를 뽑는 프로세스 수. None 이면 코어 수에서 하나를 뺀다.
+        self.landmark_workers = None
         self.tags_path = self.data_dir / "tags.json"
         self.video_max_width = 640
         self.video_fps = 15
@@ -91,6 +95,13 @@ class Settings:
         self.augment_jitter_copies = 2
         # 양수는 위를 늘리고 아래를 줄인다. 음수는 위를 줄이고 아래를 늘린다.
         self.augment_trapezoids = (0.05, 0.10, -0.05, -0.10)
+        # 딥러닝은 인식과 같이 최근 1초를 15fps로 본다. 손이 이보다 적게 잡히면 판단하지 않는다.
+        self.seq_window = 15
+        self.seq_min_frames = 3
+        self.seq_epochs = 50
+        # 움직여야 그 동작인 태그. 처음·끝 자세로 멈춘 손은 딥러닝이 무동작으로 배운다.
+        # 스크롤, 새로고침, 스크린샷, 우클릭은 자세를 유지하는 동안 그 동작이다.
+        self.moving_tags = ("left_click_on", "left_click_off", "back", "forward")
         self.train_tag_ids = (
             "left_click_on",
             "left_click_off",
