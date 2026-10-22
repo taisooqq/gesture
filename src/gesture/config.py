@@ -67,7 +67,7 @@ class Settings:
         self.idle_motion = 0.12
         # 같은 제스처가 무동작으로 깜빡여도, 이 시간 동안 쉬기 전에는 다시 실행하지 않는다.
         self.refire_seconds = 0.45
-        # 시연용. 오른손. 뒤로가기는 중지 끝 x가 이 값 이하, 앞으로가기는 이 값 이상일 때만 나간다.
+        # 인식 화면 좌표 표시용. 중지 끝 x가 이보다 왼쪽이면 손등, 오른쪽이면 손바닥으로 적는다.
         self.dorsum_x = -1.0
         self.palm_x = 1.0
         self.min_hand_ratio = 0.03

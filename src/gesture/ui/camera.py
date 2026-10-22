@@ -147,16 +147,9 @@ class CameraPane:
             return "idle", 0.0
         # 판단
         label, conf, _action, _fired = self.smoother.update(ordered)
-        label = self._swipe_by_facing(frame, label)
         # 우클릭은 모델이 그렇게 말하면 그대로 쓴다. 손가락 거리로 막거나 유지하지 않는다.
         if label == "right_click":
             return label, conf
-        # 뒤로가기·앞으로가기만 최근 움직임이 있어야 한다.
-        # 새로고침, 스크롤, 좌클릭 누르기·떼기는 자세라서 멈춰 있어도 통과한다.
-        if label in self.settings.motion_tags:
-            motion = self.analyzer.tip_motion(self._frames_within(self.settings.idle_seconds))
-            if motion is None or motion < self.settings.idle_motion:
-                return "idle", 0.0
         if label not in ("none", "idle"):
             return label, conf
         return "idle", 0.0
@@ -196,11 +189,6 @@ class CameraPane:
         label, conf, _action, _fired = self.smoother.update(ordered)
         if label in ("left_click_on", "left_click_off", "idle"):
             return "idle", 0.0
-        label = self._swipe_by_facing(frame, label)
-        if label in self.settings.motion_tags:
-            motion = self.analyzer.tip_motion(self._frames_within(self.settings.idle_seconds))
-            if motion is None or motion < self.settings.idle_motion:
-                return "idle", 0.0
         if label not in ("none", "idle"):
             return label, conf
         return "idle", 0.0
@@ -284,23 +272,6 @@ class CameraPane:
         for index, cls in enumerate(self.model.classes_):
             ordered[int(cls)] = proba[index]
         return ordered
-
-    # 모델이 고른 스와이프를 다른 쪽으로 바꾸지 않는다.
-    # 뒤로가기는 모델이 뒤로가기이고 중지 끝 x가 -1 이하일 때만 나간다.
-    # 앞으로가기는 모델이 앞으로가기이고 중지 끝 x가 +1 이상일 때만 나간다.
-    # 손이 가운데로 돌아오며 반대 면이 보여도, 그때 모델이 말한 동작이 아니면 명령이 나가지 않는다.
-    def _swipe_by_facing(self, frame, label):
-        """뒤로가기·앞으로가기는 모델 판정과 중지 끝 x가 같이 맞을 때만 통과합니다."""
-        if label not in ("back", "forward"):
-            return label
-        middle_x = self.analyzer.middle_x(frame)
-        if middle_x is None:
-            return "idle"
-        if label == "back" and middle_x <= self.settings.dorsum_x:
-            return "back"
-        if label == "forward" and middle_x >= self.settings.palm_x:
-            return "forward"
-        return "idle"
 
     # 한 번 한 동작이 여러 번 나가지 않게 막는다.
     # 뒤로가기처럼 손을 한 번 저어도 속도가 잠깐 느려지면 무동작이 되었다가
