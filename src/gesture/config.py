@@ -50,6 +50,9 @@ class Settings:
         self.press_frames = 10
         # 누르기가 인식된 뒤 이 시간 동안은 커서를 움직이지 않는다.
         self.press_still_seconds = 0.3
+        # 좌클릭을 뗀 뒤 이 시간 안에 다시 누르기가 인식되면, 첫 클릭 자리에 더블클릭을 보낸다.
+        # 손동작은 두 번 누르는 사이가 1초 넘게 걸려서, 운영체제의 더블클릭 시간(약 0.5초)에 못 맞춘다.
+        self.double_click_seconds = 1.2
         # 좌클릭을 누른 뒤 떼기만 최근 이 시간으로 본다.
         # 1초 창에는 접힌 자세가 남아 떼기가 늦다.
         self.release_seconds = 0.5
