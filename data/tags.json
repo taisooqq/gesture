@@ -45,7 +45,7 @@
     {
       "id": "screenshot",
       "title": "스크린샷",
-      "detail": "중지올리기",
+      "detail": "영역전개",
       "train": true,
       "threshold": 0.8
     },
