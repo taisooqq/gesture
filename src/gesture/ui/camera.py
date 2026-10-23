@@ -197,7 +197,11 @@ class CameraPane:
         """딥러닝은 동작이 나가면 그 전 장을 다음 판단에서 뺍니다."""
         if getattr(self, "model_kind", "forest") != "motion":
             return
-        if label in ("left_click_on", "left_click_off") or label in self._MOMENTARY:
+        if (
+            label in ("left_click_on", "left_click_off")
+            or label in self._MOMENTARY
+            or label in self.settings.idle_gesture_tags
+        ):
             self._consumed_at = now
             self.smoother.reset()
 
@@ -327,9 +331,13 @@ class CameraPane:
         self._blocked = None
         self._sent_label = label
         self._consume(label, now)
-        if label in self._MOMENTARY:
+        if label in self._MOMENTARY or label in self.settings.idle_gesture_tags:
             self._lock_until = now + self.settings.refire_seconds
             self._lock_label = label
+        if label in self.settings.idle_gesture_tags:
+            # 스와이프 후 돌아오는 손. 화면에만 남기고 브라우저는 안 보낸다.
+            self._control_note = None
+            return "ok"
         if label == "left_click_on":
             ok = self._press_or_double(now)
         elif label == "left_click_off":

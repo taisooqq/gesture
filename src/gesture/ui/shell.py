@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 class Shell(QWidget):
-    """등록 탭에서 Space는 녹화, 방향키는 태그 이동입니다."""
+    """등록 탭에서 Space는 녹화, R은 다시 재생, D는 영상 삭제, 방향키는 목록을 이동합니다."""
 
     def __init__(self, owner: "GestureWindow"):
         super().__init__()
@@ -33,10 +33,16 @@ class Shell(QWidget):
             if not event.isAutoRepeat():
                 self.owner._toggle_record()
             return True
+        if key == Qt.Key.Key_R and not event.isAutoRepeat():
+            self.owner._replay_clip()
+            return True
+        if key == Qt.Key.Key_D and not event.isAutoRepeat():
+            self.owner._delete_clip()
+            return True
         if key in (Qt.Key.Key_Up, Qt.Key.Key_Left):
-            self.owner._move_tag(-1)
+            self.owner._move_nav(-1)
             return True
         if key in (Qt.Key.Key_Down, Qt.Key.Key_Right):
-            self.owner._move_tag(1)
+            self.owner._move_nav(1)
             return True
         return super().eventFilter(obj, event)

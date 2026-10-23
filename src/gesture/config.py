@@ -28,6 +28,8 @@ class Settings:
             "scissors": "가위",
             "one": "손가락 1",
             "thumb": "엄지",
+            "back_idle": "뒤로가기후돌아오기",
+            "forward_idle": "앞으로가기후돌아오기",
         }
         self.actions = {
             "fist": "next",
@@ -104,13 +106,25 @@ class Settings:
         self.seq_epochs = 50
         # 움직여야 그 동작인 태그. 처음·끝 자세로 멈춘 손은 딥러닝이 무동작으로 배운다.
         # 스크롤, 새로고침, 스크린샷, 우클릭은 자세를 유지하는 동안 그 동작이다.
-        self.moving_tags = ("left_click_on", "left_click_off", "back", "forward")
+        # back_idle·forward_idle 은 스와이프 후 손이 돌아오는 움직임이다. 브라우저 명령은 안 보낸다.
+        self.moving_tags = (
+            "left_click_on",
+            "left_click_off",
+            "back",
+            "forward",
+            "back_idle",
+            "forward_idle",
+        )
+        # 인식만 하고 마우스·키는 안 보내는 태그. 반대 스와이프 오인을 먹는다.
+        self.idle_gesture_tags = ("back_idle", "forward_idle")
         self.train_tag_ids = (
             "left_click_on",
             "left_click_off",
             "right_click",
             "back",
             "forward",
+            "back_idle",
+            "forward_idle",
             "refresh",
             "screenshot",
             "scroll_up",
@@ -122,6 +136,8 @@ class Settings:
             ("right_click", "우클릭", "엄지와 검지를 제외한 나머지 손가락이 맞닿음"),
             ("back", "뒤로가기", "손바닥을 세우고 오른쪽에서 왼쪽으로 움직임"),
             ("forward", "앞으로가기", "손바닥을 세우고 왼쪽에서 오른쪽으로 움직임"),
+            ("back_idle", "뒤로가기후돌아오기", "뒤로가기 후 손을 가운데로 되돌림"),
+            ("forward_idle", "앞으로가기후돌아오기", "앞으로가기 후 손을 가운데로 되돌림"),
             ("refresh", "새로고침", "새끼손가락 올림"),
             ("screenshot", "스크린샷", "중지올리기"),
             ("scroll_up", "위로 스크롤", "따봉"),

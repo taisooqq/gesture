@@ -56,6 +56,7 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         self.clip_path = None
         self.clip_fps = 15.0
         self.clip_next = 0.0
+        self.clip_done = False
         self.app = None
         self.window = None
         self.timer = None
@@ -212,8 +213,10 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         self.clip_header.setStyleSheet("font-size: 15px; font-weight: 600;")
         self.clip_list = QListWidget()
         self.clip_list.currentItemChanged.connect(self._select_clip)
+        self.clip_list.itemPressed.connect(self._focus_clips)
         self.delete_clip_button = QPushButton("영상 삭제")
         self.delete_clip_button.clicked.connect(self._delete_clip)
+        self._nav_target = "tags"
         side_layout.addWidget(self.clip_header)
         side_layout.addWidget(self.clip_list, 1)
         side_layout.addWidget(self.delete_clip_button)
@@ -227,7 +230,7 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         tabs.setCurrentIndex(1)
         tabs.currentChanged.connect(self._on_tab_changed)
         self.register_status.setText(
-            "Space로 녹화와 저장을 전환합니다. 방향키로 태그를 이동합니다."
+            "Space 녹화·저장, R 다시 재생, D 영상 삭제, 방향키는 마지막에 누른 태그·영상 목록을 이동합니다."
         )
         self._reload_models()
 

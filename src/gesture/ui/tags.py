@@ -51,6 +51,7 @@ class TagPane:
     def _choose_tag(self, tag_id):
         if self.recorder.recording:
             return
+        self._nav_target = "tags"
         self.tag = tag_id
         self._mark_selected()
         self._reload_clips()
@@ -58,15 +59,40 @@ class TagPane:
         if row is not None:
             self.tag_scroll.ensureWidgetVisible(row)
 
+    def _move_nav(self, delta):
+        """마지막에 클릭한 쪽(태그 또는 영상)을 방향키로 옮깁니다."""
+        if getattr(self, "_nav_target", "tags") == "clips":
+            self._move_clip(delta)
+            return
+        self._move_tag(delta)
+
     def _move_tag(self, delta):
         if self.recorder.recording or not self.tags:
             return
+        self._nav_target = "tags"
         ids = [item["id"] for item in self.tags]
         if self.tag not in ids:
             index = 0 if delta > 0 else len(ids) - 1
         else:
             index = (ids.index(self.tag) + delta) % len(ids)
         self._choose_tag(ids[index])
+
+    def _move_clip(self, delta):
+        if self.recorder.recording or not hasattr(self, "clip_list"):
+            return
+        count = self.clip_list.count()
+        if count <= 0:
+            return
+        self._nav_target = "clips"
+        row = self.clip_list.currentRow()
+        if row < 0:
+            row = 0 if delta > 0 else count - 1
+        else:
+            row = (row + delta) % count
+        self.clip_list.setCurrentRow(row)
+        item = self.clip_list.currentItem()
+        if item is not None:
+            self.clip_list.scrollToItem(item)
 
     def _mark_selected(self):
         for tag_id, row in self.tag_rows.items():

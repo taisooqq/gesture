@@ -5,7 +5,7 @@ from pathlib import Path
 
 import cv2
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QListWidgetItem, QMessageBox
+from PySide6.QtWidgets import QListWidgetItem
 
 from gesture.model.store import ModelStore
 from gesture.recorder import VideoRecorder, open_video
@@ -98,6 +98,10 @@ class ClipPane:
             return
         self._open_clip(Path(current.data(Qt.UserRole)))
 
+    def _focus_clips(self, _item=None):
+        """영상 목록을 누르면 방향키가 영상으로 가게 합니다."""
+        self._nav_target = "clips"
+
     def _open_clip(self, path):
         if self.clip_path == path and self.clip_cap is not None:
             return
@@ -110,6 +114,7 @@ class ClipPane:
         fps = cap.get(cv2.CAP_PROP_FPS)
         self.clip_fps = fps if 1 <= fps <= 60 else 15.0
         self.clip_next = 0.0
+        self.clip_done = False
         self.clip_cap = cap
         self.clip_path = path
         self._mark_selected()
@@ -119,11 +124,12 @@ class ClipPane:
             self.clip_cap.release()
         self.clip_cap = None
         self.clip_path = None
+        self.clip_done = False
         if hasattr(self, "clip_image"):
             self.clip_image.clear()
 
     def _play_clip(self):
-        if self.clip_cap is None:
+        if self.clip_cap is None or getattr(self, "clip_done", False):
             return
         now = time.perf_counter()
         if now < self.clip_next:
@@ -131,32 +137,43 @@ class ClipPane:
         self.clip_next = now + 1.0 / self.clip_fps
         ok, frame = self.clip_cap.read()
         if not ok:
-            self.clip_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            ok, frame = self.clip_cap.read()
+            # 한 번만 재생한다. R 키로 처음부터 다시 본다.
+            self.clip_done = True
+            return
+        self._set_image(self.clip_image, frame)
+
+    def _replay_clip(self):
+        """저장 영상을 처음부터 다시 재생합니다."""
+        if self.recorder.recording or self.clip_cap is None:
+            return
+        self.clip_cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        self.clip_next = 0.0
+        self.clip_done = False
+        ok, frame = self.clip_cap.read()
         if ok:
             self._set_image(self.clip_image, frame)
 
     def _delete_clip(self):
+        """고른 영상 파일을 바로 지웁니다. 확인 창은 띄우지 않습니다."""
         if self.recorder.recording or self.clip_path is None:
             return
         path = self.clip_path
-        relative = path.relative_to(self.settings.video_dir).as_posix()
-        trained = relative in self.model_store.trained_videos()
-        note = "\n이 영상은 이미 학습에 사용되었습니다." if trained else ""
-        answer = QMessageBox.question(
-            self.window,
-            "영상 삭제",
-            f"{path.name} 파일을 삭제할까요?{note}",
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
+        row = self.clip_list.currentRow()
+        # 지우면 바로 위 영상에 포커스. 맨 위면 다음 영상(지운 뒤 맨 위)으로 둔다.
+        focus = None
+        if row > 0:
+            focus = Path(self.clip_list.item(row - 1).data(Qt.UserRole))
+        elif self.clip_list.count() > 1:
+            focus = Path(self.clip_list.item(1).data(Qt.UserRole))
+        name = path.name
         self._close_clip()
         if path.exists():
             path.unlink()
-        self._reload_clips()
+        self._nav_target = "clips"
+        self._reload_clips(select=focus)
         if self.tag:
             self._refresh_tag(self.tag)
-        self.register_status.setText("영상을 삭제했습니다.")
+        self.register_status.setText(f"영상을 삭제했습니다. {name}")
 
 
 def _frame_count(path):
