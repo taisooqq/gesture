@@ -52,6 +52,9 @@ class Settings:
         self.press_frames = 10
         # 누르기가 인식된 뒤 이 시간 동안은 커서를 움직이지 않는다.
         self.press_still_seconds = 0.3
+        # 좌클릭을 뗀 뒤 이 시간 안에 다시 누르기가 인식되면, 첫 클릭 자리에 더블클릭을 보낸다.
+        # 손동작은 두 번 누르는 사이가 1초 넘게 걸려서, 운영체제의 더블클릭 시간(약 0.5초)에 못 맞춘다.
+        self.double_click_seconds = 1.2
         # 좌클릭을 누른 뒤 떼기만 최근 이 시간으로 본다.
         # 1초 창에는 접힌 자세가 남아 떼기가 늦다.
         self.release_seconds = 0.5
@@ -101,11 +104,6 @@ class Settings:
         self.seq_window = 15
         self.seq_min_frames = 3
         self.seq_epochs = 50
-        # 연속 클릭 학습. 누르기·떼기 묶음마다 이 확률로, 반대 동작 끝 몇 장을 앞에 붙인 묶음을 하나 더 만든다.
-        # 더블클릭의 두 번째 누르기처럼, 앞 동작 바로 뒤에 이어지는 누르기·떼기를 배우게 한다. 0이면 끈다.
-        self.chain_click_ratio = 0.5
-        # 앞에 붙이는 장 수의 최소·최대. 15fps에서 1~6장은 약 0.07~0.4초다.
-        self.chain_tail_frames = (1, 6)
         # 동작 점수가 무동작보다 이만큼 더 높을 때만 그 동작으로 본다. 오인을 줄인다.
         self.idle_margin = 0.15
         # 움직여야 그 동작인 태그. 처음·끝 자세로 멈춘 손은 딥러닝이 무동작으로 배운다.

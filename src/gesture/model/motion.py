@@ -80,11 +80,8 @@ class Augmenter:
         self.window = int(settings.seq_window)
         self.min_frames = int(settings.seq_min_frames)
 
-    def moved(self, joints, depth, aspect, edges=True):
-        """사다리꼴, 회전, 속도, 앞뒤로 멈춘 장면, 흔들림을 임의로 섞습니다.
-
-        edges 가 False 면 앞뒤에 멈춘 장면을 붙이지 않습니다. 이어 붙인 연속 클릭에 씁니다.
-        """
+    def moved(self, joints, depth, aspect):
+        """사다리꼴, 회전, 속도, 앞뒤로 멈춘 장면, 흔들림을 임의로 섞습니다."""
         rng = self.rng
         if rng.random() < 0.2:
             return features(joints, depth, aspect)
@@ -93,8 +90,7 @@ class Augmenter:
         joints = _rotate(joints, _pick(rng, self.settings.augment_rotations))
         if rng.random() < 0.5:
             joints, depth = _warp(joints, depth, _pick(rng, self.settings.augment_speeds))
-        if edges:
-            joints, depth = self._still_edges(joints, depth)
+        joints, depth = self._still_edges(joints, depth)
         joints, depth = self._jitter(joints, depth)
         return _features(joints, depth)
 
@@ -138,32 +134,6 @@ class Augmenter:
         joints = joints + self.rng.normal(0.0, sigma, size=joints.shape).astype(np.float32)
         depth = depth + self.rng.normal(0.0, sigma, size=depth.shape).astype(np.float32)
         return joints, depth
-
-
-# 더블클릭의 두 번째 누르기는 "손 편 채 멈춤"이 아니라 "엄지를 펴는 끝"에서 바로 시작한다.
-# 인식은 동작이 나간 뒤의 장만 보므로, 앞 동작의 끝 몇 장 + 다음 동작이 모델이 실제로 보는 장면이다.
-# 두 영상은 손 위치와 크기가 다르다. 그대로 붙이면 이음매에서 손이 순간이동한 것처럼 보이므로,
-# 앞 조각을 뒤 조각 첫 장의 손목 위치·손 크기에 맞춰 옮긴다.
-def chain(prefix_joints, prefix_depth, joints, depth, tail, window):
-    """앞 동작의 끝 tail 장을 뒤 동작 앞에 붙입니다. 길이는 window 장을 넘지 않고, 뒤 동작의 끝은 남깁니다."""
-    tail = int(max(1, min(tail, prefix_joints.shape[0])))
-    head_j = prefix_joints[-tail:].astype(np.float32)
-    head_d = prefix_depth[-tail:].astype(np.float32)
-    # 뒤 동작이 길면 앞을 잘라 window 장에 맞춘다. 이음매는 잘린 뒤의 첫 장이다.
-    keep = max(1, int(window) - tail)
-    body_j = joints[-keep:]
-    body_d = depth[-keep:]
-    last = head_j[-1]
-    first = body_j[0]
-    last_scale = float(np.linalg.norm(last[_MIDDLE_MCP] - last[_WRIST]))
-    first_scale = float(np.linalg.norm(first[_MIDDLE_MCP] - first[_WRIST]))
-    ratio = first_scale / last_scale if last_scale > 1e-4 else 1.0
-    head_j = (head_j - last[_WRIST]) * ratio + first[_WRIST]
-    head_d = (head_d - head_d[-1, _WRIST]) * ratio + body_d[0, _WRIST]
-    return (
-        np.concatenate([head_j, body_j]).astype(np.float32),
-        np.concatenate([head_d, body_d]).astype(np.float32),
-    )
 
 
 def _pick(rng, values):
