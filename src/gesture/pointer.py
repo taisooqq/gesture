@@ -195,8 +195,10 @@ elif sys.platform == "win32":
         "opera.exe",
         "chromium.exe",
     }
-    # Alt+왼쪽, Alt+오른쪽, Ctrl+R. 윈도우 브라우저의 뒤로, 앞으로, 새로고침이다.
-    _WIN_KEYS = {"back": (0x12, 0x25), "forward": (0x12, 0x27), "refresh": (0x11, 0x52)}
+    # 뒤로·앞으로는 브라우저 전용 키(VK_BROWSER_BACK/FORWARD). Alt+화살표는 유튜브 5초 이동과 겹친다.
+    # 새로고침은 Ctrl+R.
+    _WIN_BROWSER = {"back": 0xA6, "forward": 0xA7}
+    _WIN_REFRESH = (0x11, 0x52)
 
     class _MOUSEINPUT(ctypes.Structure):
         _fields_ = [
@@ -395,7 +397,13 @@ elif sys.platform == "win32":
             return
         _focus(hwnd)
         time.sleep(0.08)
-        modifier, key = _WIN_KEYS[action]
+        if action in _WIN_BROWSER:
+            key = _WIN_BROWSER[action]
+            _tap(key, False)
+            time.sleep(0.02)
+            _tap(key, True)
+            return
+        modifier, key = _WIN_REFRESH
         _tap(modifier, False)
         _tap(key, False)
         time.sleep(0.02)
