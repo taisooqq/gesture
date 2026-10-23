@@ -180,18 +180,32 @@ class CameraPane:
         limits = getattr(self.smoother.settings, "thresholds", None)
         limit = float(limits[best]) if limits is not None else self.settings.conf_threshold
         if waiting:
-            if name == "left_click_off" and conf >= limit:
+            if name == "left_click_off" and conf >= limit and not self._idle_blocks(ordered, name, conf):
                 self.smoother.reset()
                 return name, conf
             return "left_click_on", held
-        if name == "left_click_on" and conf >= limit:
+        if name == "left_click_on" and conf >= limit and not self._idle_blocks(ordered, name, conf):
             return name, conf
         label, conf, _action, _fired = self.smoother.update(ordered)
         if label in ("left_click_on", "left_click_off", "idle"):
             return "idle", 0.0
-        if label not in ("none", "idle"):
+        if label not in ("none", "idle") and not self._idle_blocks(ordered, label, conf):
             return label, conf
         return "idle", 0.0
+
+    def _idle_blocks(self, ordered, name, conf):
+        """무동작 점수가 높거나 1등과 비슷하면 그 동작으로 보지 않습니다."""
+        if name in ("none", "idle") or "idle" not in self.model_tags:
+            return False
+        idle_index = self.model_tags.index("idle")
+        idle_p = float(ordered[idle_index])
+        limits = getattr(self.smoother.settings, "thresholds", None)
+        idle_limit = (
+            float(limits[idle_index]) if limits is not None else self.settings.conf_threshold
+        )
+        if idle_p >= idle_limit:
+            return True
+        return conf - idle_p < float(self.settings.idle_margin)
 
     def _consume(self, label, now):
         """딥러닝은 동작이 나가면 그 전 장을 다음 판단에서 뺍니다."""

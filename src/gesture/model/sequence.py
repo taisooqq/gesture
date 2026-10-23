@@ -58,14 +58,15 @@ def train_motion_model(clips, tags, settings, seed=0):
     for label, _joints, _depth, _aspect, moving in clips:
         counts[label] += 1.0
         if moving and idle is not None:
-            counts[idle] += 0.5
+            # 앞·끝 멈춘 손을 무동작으로 자주 넣으므로 가중치도 더 준다.
+            counts[idle] += 2.0
     weights = torch.tensor(counts.sum() / np.maximum(counts, 1.0) / len(tags), dtype=torch.float32, device=device)
     loss_fn = nn.CrossEntropyLoss(weight=weights)
     optimizer = torch.optim.Adam(network.parameters(), lr=1e-3, weight_decay=1e-4)
     augmenter = Augmenter(settings, rng)
     batch = 64
     for _epoch in range(int(settings.seq_epochs)):
-        xs, ys = _epoch_samples(clips, augmenter, idle, rng)
+        xs, ys = _epoch_samples(clips, augmenter, idle, rng, tags, settings)
         order = rng.permutation(len(xs))
         network.train()
         for start in range(0, len(order), batch):
@@ -83,20 +84,27 @@ def train_motion_model(clips, tags, settings, seed=0):
     return MotionModel(network, tags, settings.seq_window)
 
 
-def _epoch_samples(clips, augmenter, idle, rng):
+def _epoch_samples(clips, augmenter, idle, rng, tags, settings):
     """한 회차의 학습 묶음. 매번 다르게 바꾼 좌표와, 멈춘 손 장면을 섞습니다."""
+    hold_pose = {index for index, name in enumerate(tags) if name in settings.hold_pose_tags}
     xs = []
     ys = []
     for label, joints, depth, aspect, moving in clips:
         xs.append(augmenter.moved(joints, depth, aspect))
         ys.append(label)
-        if moving and idle is not None and rng.random() < 0.5:
-            index = 0 if rng.random() < 0.5 else joints.shape[0] - 1
-            xs.append(augmenter.held(joints, depth, aspect, index))
-            ys.append(idle)
-        elif not moving and rng.random() < 0.15:
-            xs.append(augmenter.held(joints, depth, aspect, int(rng.integers(0, joints.shape[0]))))
-            ys.append(label)
+        if moving and idle is not None:
+            # 맨 앞·맨 끝 자세로 멈춘 손을 둘 다 무동작으로 넣는다. 인식에서 무동작을 더 세게 본다.
+            for index in (0, joints.shape[0] - 1):
+                xs.append(augmenter.held(joints, depth, aspect, index))
+                ys.append(idle)
+        elif not moving and rng.random() < 0.25:
+            held = augmenter.held(joints, depth, aspect, int(rng.integers(0, joints.shape[0])))
+            xs.append(held)
+            # 스크롤만 멈춘 손을 그 동작으로 둔다. 우클릭 등은 멈춘 손을 무동작으로 둔다.
+            if label in hold_pose:
+                ys.append(label)
+            elif idle is not None:
+                ys.append(idle)
     return xs, ys
 
 

@@ -104,8 +104,10 @@ class Settings:
         self.seq_window = 15
         self.seq_min_frames = 3
         self.seq_epochs = 50
+        # 동작 점수가 무동작보다 이만큼 더 높을 때만 그 동작으로 본다. 오인을 줄인다.
+        self.idle_margin = 0.15
         # 움직여야 그 동작인 태그. 처음·끝 자세로 멈춘 손은 딥러닝이 무동작으로 배운다.
-        # 스크롤, 새로고침, 스크린샷, 우클릭은 자세를 유지하는 동안 그 동작이다.
+        # 스크롤만 멈춘 손을 그 동작으로 두고, 우클릭·새로고침·스크린샷의 멈춘 손은 무동작이다.
         # back_idle·forward_idle 은 스와이프 후 손이 돌아오는 움직임이다. 브라우저 명령은 안 보낸다.
         self.moving_tags = (
             "left_click_on",
@@ -115,6 +117,7 @@ class Settings:
             "back_idle",
             "forward_idle",
         )
+        self.hold_pose_tags = ("scroll_up", "scroll_down")
         # 인식만 하고 마우스·키는 안 보내는 태그. 반대 스와이프 오인을 먹는다.
         self.idle_gesture_tags = ("back_idle", "forward_idle")
         self.train_tag_ids = (
