@@ -121,6 +121,11 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         log_layout.addWidget(self.gesture_log, 1)
         recognize_layout.addLayout(left, 1)
         recognize_layout.addWidget(log_panel)
+        # 실제 동작(작은 창)일 때 로그를 영상 아래로 옮기기 위해 보관한다.
+        self._recognize_layout = recognize_layout
+        self._recognize_left = left
+        self._log_panel = log_panel
+        self._log_layout = log_layout
 
         register_layout = QHBoxLayout(register)
 
@@ -259,11 +264,22 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         self._saved_geometry = self.window.geometry()
         self._saved_min_size = self.window.minimumSize()
         self._saved_image_min = self.recognize_image.minimumHeight()
-        self.recognize_image.setMinimumHeight(120)
-        self.window.setMinimumSize(640, 240)
+        # 로그를 오른쪽에서 빼서 영상·상태 아래에 붙인다.
+        self._recognize_layout.removeWidget(self._log_panel)
+        self._log_panel.setMinimumWidth(0)
+        self._log_panel.setMaximumWidth(16777215)
+        self._log_layout.setContentsMargins(0, 4, 0, 0)
+        self.gesture_log.setMaximumHeight(140)
+        self._recognize_left.addWidget(self._log_panel, 0)
+        # 카메라 16:9에 맞춘 작은 창. 가로는 영상, 세로는 버튼·영상·상태·로그.
         screen = self.window.screen().availableGeometry()
-        width = min(760, screen.width() - 24)
-        height = 280
+        width = min(640, max(480, screen.width() - 24))
+        video_h = int((width - 40) * 9 / 16)
+        height = 56 + 32 + video_h + 28 + 24 + 140 + 28
+        height = min(height, screen.height() - 24)
+        self.recognize_image.setMinimumHeight(max(120, video_h - 20))
+        self.recognize_image.setMaximumHeight(video_h + 20)
+        self.window.setMinimumSize(480, 360)
         current = self.window.geometry()
         x = min(max(screen.x(), current.x()), screen.x() + screen.width() - width)
         y = min(max(screen.y(), current.y()), screen.y() + screen.height() - height)
@@ -275,7 +291,14 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         if not self._compact:
             return
         self._compact = False
+        # 로그를 다시 영상 오른쪽으로 되돌린다.
+        self._recognize_left.removeWidget(self._log_panel)
+        self._log_panel.setFixedWidth(230)
+        self._log_layout.setContentsMargins(8, 0, 0, 0)
+        self.gesture_log.setMaximumHeight(16777215)
         self.recognize_image.setMinimumHeight(self._saved_image_min)
+        self.recognize_image.setMaximumHeight(16777215)
+        self._recognize_layout.addWidget(self._log_panel)
         self.window.setMinimumSize(self._saved_min_size)
         self.window.show()
         if self._saved_geometry is not None:
