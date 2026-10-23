@@ -306,7 +306,7 @@ class CameraPane:
         armed = self.tabs.currentIndex() == 0 and self.live_button.isChecked()
         if not armed:
             self._release_click()
-            self._reset_double()
+            self._clear_cursor_pin()
             if self.tabs.currentIndex() != 0:
                 self._sent_label = None
                 self._blocked = None
@@ -326,7 +326,7 @@ class CameraPane:
             return "off"
         if label == "none":
             self._release_click()
-            self._reset_double()
+            self._clear_cursor_pin()
             self._remember_until_quiet(label, now)
             self._control_note = None
             return "idle"
@@ -353,11 +353,9 @@ class CameraPane:
             self._control_note = None
             return "ok"
         if label == "left_click_on":
-            ok = self._press_or_double(now)
+            ok = self._press_click(now)
         elif label == "left_click_off":
-            ok = pointer.left_up()
-            self._click_held = False
-            self._finish_click(now)
+            ok = self._release_click_finish(now)
         elif label == "right_click":
             ok = pointer.right_click()
         elif label in ("back", "forward", "refresh"):
@@ -401,49 +399,57 @@ class CameraPane:
             self._click_conf = conf
         return label, conf
 
-    # 손동작으로 두 번 누르면 사이가 1초 넘게 걸린다. 운영체제는 0.5초 안의 두 번만 더블클릭으로 본다.
-    # 그래서 뗀 뒤 double_click_seconds 안에 다시 누르기가 오면, 첫 클릭 자리로 커서를 돌리고
-    # 누르기·떼기 두 번을 한 번에 보낸다. 이때는 버튼을 누른 채로 두지 않아 파일이 끌려가지 않는다.
-    # 이 누르기에 이어지는 떼기는 버튼을 놓을 것이 없으므로 기록만 정리한다.
-    def _press_or_double(self, now):
-        """좌클릭 누르기. 방금 뗀 클릭 바로 뒤면 더블클릭을 보냅니다."""
-        released = getattr(self, "_released_at", None)
-        if released is not None and now - released <= self.settings.double_click_seconds:
-            self._released_at = None
-            place = getattr(self, "_last_click_ratio", None)
+    # 좌클릭은 실제 down/up만 보낸다. 더블클릭용 합성 입력은 쓰지 않는다.
+    # 대신 누르기 직후·짧은 떼기 뒤에는 커서를 클릭 자리에 고정해서
+    # OS가 같은 자리의 두 번 클릭을 더블로 보게 한다.
+    def _press_click(self, now):
+        """좌클릭을 누른다. 떼기 후 고정 중에 다시 누르면 떼기까지 자리를 유지한다."""
+        still = self.settings.press_still_seconds
+        after = getattr(self, "_cursor_pin_after_release", False)
+        if after and now < getattr(self, "_cursor_pin_until", 0.0):
+            # 짧은 클릭 뒤 고정 구간에서 다시 누름 → 두 번째 떼기까지 고정
+            self._cursor_pin_after_release = False
+            self._cursor_pin_hold = True
+        else:
+            self._cursor_pin_after_release = False
+            self._cursor_pin_hold = False
+            place = getattr(self, "_aim_ratio", None)
             if place is not None:
-                pointer.move_ratio(*place)
-            self._double_sent = True
-            self._click_held = False
-            return pointer.double_click()
-        self._double_sent = False
-        # 누르기 순간의 커서 자리. _aim 이 누르기 동안 커서를 멈춰 두므로 직전 자리가 클릭 자리다.
-        self._click_ratio = getattr(self, "_aim_ratio", None)
+                self._cursor_pin_ratio = place
+            self._cursor_pin_until = now + still
         ok = pointer.left_down()
         if ok:
             self._click_held = True
         return ok
 
-    def _finish_click(self, now):
-        """떼기가 끝나면 다음 누르기가 더블클릭인지 볼 수 있게 시각과 자리를 남깁니다."""
-        if getattr(self, "_double_sent", False):
-            # 더블클릭 뒤의 떼기다. 세 번째 누르기는 다시 한 번 클릭으로 시작한다.
-            self._double_sent = False
-            self._released_at = None
-            return
-        self._released_at = now
-        self._last_click_ratio = getattr(self, "_click_ratio", None)
+    def _release_click_finish(self, now):
+        """좌클릭을 뗀다. 누르기 고정 안에 뗐으면 같은 자리를 한 번 더 고정한다."""
+        ok = pointer.left_up()
+        self._click_held = False
+        still = self.settings.press_still_seconds
+        if getattr(self, "_cursor_pin_hold", False):
+            # 더블의 두 번째 떼기. 짧게 더 붙잡아 OS가 같은 자리로 보게 한다.
+            self._cursor_pin_hold = False
+            self._cursor_pin_after_release = False
+            self._cursor_pin_until = now + self.settings.press_release_still_seconds
+        elif now < getattr(self, "_cursor_pin_until", 0.0):
+            self._cursor_pin_until = now + still
+            self._cursor_pin_after_release = True
+        else:
+            self._clear_cursor_pin()
+        return ok
 
-    def _reset_double(self):
-        """손이 사라지거나 실제 동작을 끄면 더블클릭 대기를 지웁니다."""
-        self._double_sent = False
-        self._released_at = None
+    def _clear_cursor_pin(self):
+        """클릭 자리 고정을 해제합니다."""
+        self._cursor_pin_hold = False
+        self._cursor_pin_after_release = False
+        self._cursor_pin_until = 0.0
 
     def _hold_mouse_if_waiting(self, label):
         """누르기를 기다리는 중인데 버튼이 올라갔으면 다시 누릅니다."""
         if label != "left_click_on" or not getattr(self, "_press_wait", False):
             return
-        if getattr(self, "_click_held", False) or getattr(self, "_double_sent", False):
+        if getattr(self, "_click_held", False):
             return
         if pointer.left_down():
             self._click_held = True
@@ -470,7 +476,7 @@ class CameraPane:
     # 동작이 무동작으로 바뀌면 그 이름을 _blocked 에 남긴다.
     # 무동작이 refire_seconds 만큼 이어지면 기억을 지워서 다음 실행을 허용한다.
     # 그 전에 같은 동작이 다시 보이면 _control 이 실행을 막는다.
-    # 좌클릭 누르기·떼기와 스크롤은 여기에 넣지 않는다. 더블클릭과 연속 스크롤이 0.45초를 기다리지 않게 하려고다.
+    # 좌클릭 누르기·떼기와 스크롤은 여기에 넣지 않는다. 연속 스크롤이 0.45초를 기다리지 않게 하려고다.
     def _remember_until_quiet(self, label, now):
         """동작이 끝나면 그 이름을 남기고, 무동작이 충분히 길면 다음 실행을 허용합니다."""
         if getattr(self, "_blocked", None) is None and self._sent_label not in (
@@ -511,7 +517,6 @@ class CameraPane:
         if not showing:
             return
         self._log_label = label
-        self._log_double = label == "left_click_on" and getattr(self, "_double_sent", False)
         self._log_started = now
         self._log_state = state if state in ("ok", "fail", "off") else "off"
         self._log_clock = time.strftime("%H:%M:%S")
@@ -530,16 +535,15 @@ class CameraPane:
     def _log_text(self, seconds):
         name = self.settings.gesture_ko.get(self._log_label, self._title(self._log_label))
         mark = {"ok": "실행", "fail": "실패", "off": "인식"}.get(self._log_state, "인식")
-        if getattr(self, "_log_double", False):
-            return f"{self._log_clock}  더블클릭  {mark}"
         if self._log_label not in self._TIMED:
             return f"{self._log_clock}  {name}  {mark}"
         return f"{self._log_clock}  {name}  {seconds:.1f}초  {mark}"
 
     # 초록 박스 안 검지 끝은 모니터의 같은 비율 위치다. 박스 왼쪽 위는 화면 왼쪽 위다.
     # 손이 없으면 커서를 더 옮기지 않는다. 트랙패드로 마우스를 움직이게 하려고다.
-    # 좌클릭 누르기가 인식되면 0.3초 동안 커서를 멈춘다.
-    # 0.3초가 지나면 그때의 검지 끝으로 옮기고, 그 뒤는 손목만큼만 움직인다.
+    # 좌클릭 누르기 직후 press_still_seconds 동안은 클릭 자리에 커서를 둔다.
+    # 그 안에 떼면 같은 시간을 한 번 더 고정하고, 그 안에 다시 누르면 떼기까지 고정한다.
+    # 고정이 끝난 뒤에도 누르고 있으면 손목만큼만 움직인다.
     # 이 함수는 클릭을 보내기 전에 호출된다.
     def _aim(self, frame, box, label):
         """초록 박스 안 검지 끝을 모니터의 같은 위치로 옮깁니다."""
@@ -556,40 +560,51 @@ class CameraPane:
             pointer.release_cursor()
             return
         pointer.arm_cursor()
-        # 더블클릭을 보낸 뒤 떼기까지는 커서를 그 자리에 둔다. 버튼은 이미 놓여 있다.
-        if getattr(self, "_double_sent", False):
-            return
         tip_x, tip_y, wrist_x, wrist_y = points
-        # 가리킬 때는 검지 끝이 모니터의 그 자리다.
-        # 누르기가 막 인식되면 0.3초 동안 커서를 멈추고, 그 순간 검지 끝으로 옮긴다.
-        locked = label == "left_click_on" or getattr(self, "_click_held", False)
         x, y, width, height = box
         now = time.perf_counter()
-        # 0.3초 안에 떼기가 오면 누르기 자리에서 버튼을 놓는다. 검지 끝으로 옮기지 않는다.
-        if label == "left_click_off" and now < getattr(self, "_press_still_until", 0.0):
-            self._press_frozen = False
-            self._aim_lock = None
+        if (
+            getattr(self, "_cursor_pin_after_release", False)
+            and now >= getattr(self, "_cursor_pin_until", 0.0)
+        ):
+            self._cursor_pin_after_release = False
+        # _control 보다 먼저 돌아서, 새 누르기 프레임에서 자리를 여기서 붙잡는다.
+        if (
+            label == "left_click_on"
+            and not getattr(self, "_click_held", False)
+            and not getattr(self, "_cursor_pin_after_release", False)
+            and not getattr(self, "_cursor_pin_hold", False)
+        ):
+            place = getattr(self, "_aim_ratio", None)
+            if place is not None:
+                self._cursor_pin_ratio = place
+            self._cursor_pin_until = now + self.settings.press_still_seconds
+        pinned = getattr(self, "_cursor_pin_hold", False) or now < getattr(
+            self, "_cursor_pin_until", 0.0
+        )
+        if pinned:
+            place = getattr(self, "_cursor_pin_ratio", None)
+            if place is None and getattr(self, "_aim_ratio", None) is not None:
+                place = self._aim_ratio
+                self._cursor_pin_ratio = place
+            if place is not None:
+                self._aim_ratio = place
+                if not pointer.move_ratio(*place):
+                    self._control_note = "손쉬운 사용 권한이 필요합니다"
             return
+        locked = label == "left_click_on" or getattr(self, "_click_held", False)
         if locked:
-            if not getattr(self, "_press_frozen", False):
-                self._press_frozen = True
-                self._press_still_until = now + self.settings.press_still_seconds
-                self._aim_lock = None
-            if now < getattr(self, "_press_still_until", 0.0):
-                return
             if getattr(self, "_aim_lock", None) is None:
                 self._aim_lock = (tip_x, tip_y, wrist_x, wrist_y)
             lock_x, lock_y, lock_wrist_x, lock_wrist_y = self._aim_lock
             place_x = lock_x + (wrist_x - lock_wrist_x)
             place_y = lock_y + (wrist_y - lock_wrist_y)
         else:
-            self._press_frozen = False
             self._aim_lock = None
             place_x, place_y = tip_x, tip_y
         self._aim_place = (place_x, place_y)
         rel_x = min(1.0, max(0.0, (place_x - x) / width))
         rel_y = min(1.0, max(0.0, (place_y - y) / height))
-        # 마지막으로 보낸 커서 자리. 더블클릭을 첫 클릭 자리에 보내려고 남긴다.
         self._aim_ratio = (rel_x, rel_y)
         if not pointer.move_ratio(rel_x, rel_y):
             self._control_note = "손쉬운 사용 권한이 필요합니다"
@@ -597,7 +612,7 @@ class CameraPane:
     def _clear_aim(self):
         """누르기 고정과 커서 멈춤을 해제합니다."""
         self._aim_lock = None
-        self._press_frozen = False
+        self._clear_cursor_pin()
 
     def _frames_within(self, seconds):
         """최근 몇 초 안의 화면만 고릅니다."""

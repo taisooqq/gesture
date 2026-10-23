@@ -50,11 +50,11 @@ class Settings:
         self.scroll_interval = 0.08
         # 좌클릭 누르기만 최근 이 프레임으로 본다. 15fps면 10장은 약 0.67초다.
         self.press_frames = 10
-        # 누르기가 인식된 뒤 이 시간 동안은 커서를 움직이지 않는다.
-        self.press_still_seconds = 0.3
-        # 좌클릭을 뗀 뒤 이 시간 안에 다시 누르기가 인식되면, 첫 클릭 자리에 더블클릭을 보낸다.
-        # 손동작은 두 번 누르는 사이가 1초 넘게 걸려서, 운영체제의 더블클릭 시간(약 0.5초)에 못 맞춘다.
-        self.double_click_seconds = 1.2
+        # 좌클릭 누르기·짧은 떼기 뒤 이 시간 동안은 클릭 자리에 커서를 고정한다.
+        # 같은 자리에서 실제 클릭이 두 번 나가 OS 더블클릭이 되게 하려는 시간이다.
+        self.press_still_seconds = 0.4
+        # 더블의 마지막 떼기 뒤에도 이 시간만큼 자리를 유지한다.
+        self.press_release_still_seconds = 0.1
         # 좌클릭을 누른 뒤 떼기만 최근 이 시간으로 본다.
         # 1초 창에는 접힌 자세가 남아 떼기가 늦다.
         self.release_seconds = 0.5
