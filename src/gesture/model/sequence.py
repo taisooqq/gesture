@@ -111,7 +111,7 @@ def _epoch_samples(clips, augmenter, idle, rng, tags, settings):
 
 # 연속 클릭(더블클릭)용 학습 묶음.
 # "떼기 끝 몇 장 + 누르기" 는 누르기, "누르기 끝 몇 장 + 떼기" 는 떼기로 넣는다.
-# 모델이 아는 동작은 그대로 누르기·떼기 둘이고, 더블클릭인지는 인식 코드가 시간으로 정한다.
+# 모델이 아는 동작은 그대로 누르기·떼기 둘이다. 빠르게 이어지는 두 번째 누르기·떼기를 잘 알아보게 한다.
 # 화면 비율이 다른 영상끼리는 손 모양이 찌그러지므로 같은 비율끼리만 붙인다.
 def _add_chained_clicks(clips, augmenter, rng, tags, settings, xs, ys):
     ratio = float(getattr(settings, "chain_click_ratio", 0.0))

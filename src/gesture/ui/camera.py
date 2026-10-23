@@ -306,7 +306,6 @@ class CameraPane:
         armed = self.tabs.currentIndex() == 0 and self.live_button.isChecked()
         if not armed:
             self._release_click()
-            self._reset_double()
             if self.tabs.currentIndex() != 0:
                 self._sent_label = None
                 self._blocked = None
@@ -326,7 +325,6 @@ class CameraPane:
             return "off"
         if label == "none":
             self._release_click()
-            self._reset_double()
             self._remember_until_quiet(label, now)
             self._control_note = None
             return "idle"
@@ -353,11 +351,12 @@ class CameraPane:
             self._control_note = None
             return "ok"
         if label == "left_click_on":
-            ok = self._press_or_double(now)
+            ok = pointer.left_down()
+            if ok:
+                self._click_held = True
         elif label == "left_click_off":
             ok = pointer.left_up()
             self._click_held = False
-            self._finish_click(now)
         elif label == "right_click":
             ok = pointer.right_click()
         elif label in ("back", "forward", "refresh"):
@@ -401,49 +400,11 @@ class CameraPane:
             self._click_conf = conf
         return label, conf
 
-    # 손동작으로 두 번 누르면 사이가 1초 넘게 걸린다. 운영체제는 0.5초 안의 두 번만 더블클릭으로 본다.
-    # 그래서 뗀 뒤 double_click_seconds 안에 다시 누르기가 오면, 첫 클릭 자리로 커서를 돌리고
-    # 누르기·떼기 두 번을 한 번에 보낸다. 이때는 버튼을 누른 채로 두지 않아 파일이 끌려가지 않는다.
-    # 이 누르기에 이어지는 떼기는 버튼을 놓을 것이 없으므로 기록만 정리한다.
-    def _press_or_double(self, now):
-        """좌클릭 누르기. 방금 뗀 클릭 바로 뒤면 더블클릭을 보냅니다."""
-        released = getattr(self, "_released_at", None)
-        if released is not None and now - released <= self.settings.double_click_seconds:
-            self._released_at = None
-            place = getattr(self, "_last_click_ratio", None)
-            if place is not None:
-                pointer.move_ratio(*place)
-            self._double_sent = True
-            self._click_held = False
-            return pointer.double_click()
-        self._double_sent = False
-        # 누르기 순간의 커서 자리. _aim 이 누르기 동안 커서를 멈춰 두므로 직전 자리가 클릭 자리다.
-        self._click_ratio = getattr(self, "_aim_ratio", None)
-        ok = pointer.left_down()
-        if ok:
-            self._click_held = True
-        return ok
-
-    def _finish_click(self, now):
-        """떼기가 끝나면 다음 누르기가 더블클릭인지 볼 수 있게 시각과 자리를 남깁니다."""
-        if getattr(self, "_double_sent", False):
-            # 더블클릭 뒤의 떼기다. 세 번째 누르기는 다시 한 번 클릭으로 시작한다.
-            self._double_sent = False
-            self._released_at = None
-            return
-        self._released_at = now
-        self._last_click_ratio = getattr(self, "_click_ratio", None)
-
-    def _reset_double(self):
-        """손이 사라지거나 실제 동작을 끄면 더블클릭 대기를 지웁니다."""
-        self._double_sent = False
-        self._released_at = None
-
     def _hold_mouse_if_waiting(self, label):
         """누르기를 기다리는 중인데 버튼이 올라갔으면 다시 누릅니다."""
         if label != "left_click_on" or not getattr(self, "_press_wait", False):
             return
-        if getattr(self, "_click_held", False) or getattr(self, "_double_sent", False):
+        if getattr(self, "_click_held", False):
             return
         if pointer.left_down():
             self._click_held = True
@@ -511,7 +472,6 @@ class CameraPane:
         if not showing:
             return
         self._log_label = label
-        self._log_double = label == "left_click_on" and getattr(self, "_double_sent", False)
         self._log_started = now
         self._log_state = state if state in ("ok", "fail", "off") else "off"
         self._log_clock = time.strftime("%H:%M:%S")
@@ -530,8 +490,6 @@ class CameraPane:
     def _log_text(self, seconds):
         name = self.settings.gesture_ko.get(self._log_label, self._title(self._log_label))
         mark = {"ok": "실행", "fail": "실패", "off": "인식"}.get(self._log_state, "인식")
-        if getattr(self, "_log_double", False):
-            return f"{self._log_clock}  더블클릭  {mark}"
         if self._log_label not in self._TIMED:
             return f"{self._log_clock}  {name}  {mark}"
         return f"{self._log_clock}  {name}  {seconds:.1f}초  {mark}"
@@ -556,9 +514,6 @@ class CameraPane:
             pointer.release_cursor()
             return
         pointer.arm_cursor()
-        # 더블클릭을 보낸 뒤 떼기까지는 커서를 그 자리에 둔다. 버튼은 이미 놓여 있다.
-        if getattr(self, "_double_sent", False):
-            return
         tip_x, tip_y, wrist_x, wrist_y = points
         # 가리킬 때는 검지 끝이 모니터의 그 자리다.
         # 누르기가 막 인식되면 0.3초 동안 커서를 멈추고, 그 순간 검지 끝으로 옮긴다.
@@ -589,8 +544,6 @@ class CameraPane:
         self._aim_place = (place_x, place_y)
         rel_x = min(1.0, max(0.0, (place_x - x) / width))
         rel_y = min(1.0, max(0.0, (place_y - y) / height))
-        # 마지막으로 보낸 커서 자리. 더블클릭을 첫 클릭 자리에 보내려고 남긴다.
-        self._aim_ratio = (rel_x, rel_y)
         if not pointer.move_ratio(rel_x, rel_y):
             self._control_note = "손쉬운 사용 권한이 필요합니다"
 

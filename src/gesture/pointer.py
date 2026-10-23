@@ -75,12 +75,11 @@ if sys.platform == "darwin":
     def _associate(enabled):
         _core.CGAssociateMouseAndMouseCursorPosition(bool(enabled))
 
-    # 맥은 몇 번째 클릭인지(clicks)를 이벤트에 직접 적어야 더블클릭으로 본다.
-    def _post(point, event_type, button, clicks=1):
+    def _post(point, event_type, button):
         event = _core.CGEventCreateMouseEvent(None, event_type, point, button)
         if not event:
             return False
-        _core.CGEventSetIntegerValueField(event, _CLICK_STATE, int(clicks))
+        _core.CGEventSetIntegerValueField(event, _CLICK_STATE, 1)
         _core.CGEventPost(_HID, event)
         _foundation.CFRelease(event)
         return True
@@ -91,15 +90,6 @@ if sys.platform == "darwin":
             return _post(point, _LEFT_DOWN, _LEFT)
         if kind == "left_up":
             return _post(point, _LEFT_UP, _LEFT)
-        if kind == "double":
-            return all(
-                (
-                    _post(point, _LEFT_DOWN, _LEFT, 1),
-                    _post(point, _LEFT_UP, _LEFT, 1),
-                    _post(point, _LEFT_DOWN, _LEFT, 2),
-                    _post(point, _LEFT_UP, _LEFT, 2),
-                )
-            )
         return _post(point, _RIGHT_DOWN, _RIGHT) and _post(point, _RIGHT_UP, _RIGHT)
 
     _core.CGEventCreateScrollWheelEvent.restype = c_void_p
@@ -332,9 +322,6 @@ elif sys.platform == "win32":
         }
         if kind == "right":
             return _click("right_down") and _click("right_up")
-        # 윈도우는 같은 자리에서 0.5초 안에 두 번 누르면 스스로 더블클릭으로 본다.
-        if kind == "double":
-            return all(_click(step) for step in ("left_down", "left_up", "left_down", "left_up"))
         entry = _INPUT(type=_INPUT_MOUSE)
         entry.mi.dwFlags = flags[kind]
         return _send_input(entry)
@@ -516,17 +503,6 @@ def left_up():
     _click("left_up")
     _left_held = False
     return True
-
-
-def double_click():
-    """지금 커서 자리에 누르기·떼기를 두 번 곧바로 보냅니다. 버튼을 누른 채로 두지 않습니다."""
-    global _left_held
-    if not trusted():
-        return False
-    if _left_held:
-        _click("left_up")
-        _left_held = False
-    return _click("double")
 
 
 def screenshot():
