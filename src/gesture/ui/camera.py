@@ -399,24 +399,29 @@ class CameraPane:
             self._click_conf = conf
         return label, conf
 
-    # 좌클릭은 실제 down/up만 보낸다. 더블클릭용 합성 입력은 쓰지 않는다.
-    # 대신 누르기 직후·짧은 떼기 뒤에는 커서를 클릭 자리에 고정해서
-    # OS가 같은 자리의 두 번 클릭을 더블로 보게 한다.
+    # 누르기 직후·짧은 떼기 뒤에는 커서를 클릭 자리에 고정한다.
+    # 제스처 on→off→on 은 OS 더블클릭 시간(약 0.5초)보다 느려서,
+    # 떼기 고정 안에 다시 누르기가 오면 그 자리에서 빠른 double_click()을 보낸다.
     def _press_click(self, now):
-        """좌클릭을 누른다. 떼기 후 고정 중에 다시 누르면 떼기까지 자리를 유지한다."""
+        """좌클릭을 누른다. 떼기 후 고정 중 다시 누르면 OS 더블클릭을 보낸다."""
         still = self.settings.press_still_seconds
         after = getattr(self, "_cursor_pin_after_release", False)
         if after and now < getattr(self, "_cursor_pin_until", 0.0):
-            # 짧은 클릭 뒤 고정 구간에서 다시 누름 → 두 번째 떼기까지 고정
             self._cursor_pin_after_release = False
             self._cursor_pin_hold = True
-        else:
-            self._cursor_pin_after_release = False
-            self._cursor_pin_hold = False
-            place = getattr(self, "_aim_ratio", None)
+            self._double_from_pin = True
+            self._click_held = False
+            place = getattr(self, "_cursor_pin_ratio", None)
             if place is not None:
-                self._cursor_pin_ratio = place
-            self._cursor_pin_until = now + still
+                pointer.move_ratio(*place)
+            return pointer.double_click()
+        self._cursor_pin_after_release = False
+        self._cursor_pin_hold = False
+        self._double_from_pin = False
+        place = getattr(self, "_aim_ratio", None)
+        if place is not None:
+            self._cursor_pin_ratio = place
+        self._cursor_pin_until = now + still
         ok = pointer.left_down()
         if ok:
             self._click_held = True
@@ -424,11 +429,18 @@ class CameraPane:
 
     def _release_click_finish(self, now):
         """좌클릭을 뗀다. 누르기 고정 안에 뗐으면 같은 자리를 한 번 더 고정한다."""
+        still = self.settings.press_still_seconds
+        if getattr(self, "_double_from_pin", False):
+            # 더블은 이미 보냄. 손 떼기 인식만 정리하고 자리를 짧게 유지한다.
+            self._double_from_pin = False
+            self._click_held = False
+            self._cursor_pin_hold = False
+            self._cursor_pin_after_release = False
+            self._cursor_pin_until = now + self.settings.press_release_still_seconds
+            return True
         ok = pointer.left_up()
         self._click_held = False
-        still = self.settings.press_still_seconds
         if getattr(self, "_cursor_pin_hold", False):
-            # 더블의 두 번째 떼기. 짧게 더 붙잡아 OS가 같은 자리로 보게 한다.
             self._cursor_pin_hold = False
             self._cursor_pin_after_release = False
             self._cursor_pin_until = now + self.settings.press_release_still_seconds
@@ -444,12 +456,13 @@ class CameraPane:
         self._cursor_pin_hold = False
         self._cursor_pin_after_release = False
         self._cursor_pin_until = 0.0
+        self._double_from_pin = False
 
     def _hold_mouse_if_waiting(self, label):
         """누르기를 기다리는 중인데 버튼이 올라갔으면 다시 누릅니다."""
         if label != "left_click_on" or not getattr(self, "_press_wait", False):
             return
-        if getattr(self, "_click_held", False):
+        if getattr(self, "_click_held", False) or getattr(self, "_double_from_pin", False):
             return
         if pointer.left_down():
             self._click_held = True
