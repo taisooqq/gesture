@@ -6,7 +6,7 @@
 
 import numpy as np
 
-from gesture.model.motion import FEATURE_KIND, Augmenter, features
+from gesture.model.motion import FEATURE_KIND, Augmenter, chain, features
 
 VERSION = 2
 
@@ -105,7 +105,38 @@ def _epoch_samples(clips, augmenter, idle, rng, tags, settings):
                 ys.append(label)
             elif idle is not None:
                 ys.append(idle)
+    _add_chained_clicks(clips, augmenter, rng, tags, settings, xs, ys)
     return xs, ys
+
+
+# 연속 클릭(더블클릭)용 학습 묶음.
+# "떼기 끝 몇 장 + 누르기" 는 누르기, "누르기 끝 몇 장 + 떼기" 는 떼기로 넣는다.
+# 모델이 아는 동작은 그대로 누르기·떼기 둘이고, 더블클릭인지는 인식 코드가 시간으로 정한다.
+# 화면 비율이 다른 영상끼리는 손 모양이 찌그러지므로 같은 비율끼리만 붙인다.
+def _add_chained_clicks(clips, augmenter, rng, tags, settings, xs, ys):
+    ratio = float(getattr(settings, "chain_click_ratio", 0.0))
+    if ratio <= 0 or "left_click_on" not in tags or "left_click_off" not in tags:
+        return
+    on = tags.index("left_click_on")
+    off = tags.index("left_click_off")
+    pools = {on: {}, off: {}}
+    for clip in clips:
+        if clip[0] in pools:
+            pools[clip[0]].setdefault(round(float(clip[3]), 2), []).append(clip)
+    low, high = (int(value) for value in settings.chain_tail_frames)
+    window = int(settings.seq_window)
+    for label, before in ((on, off), (off, on)):
+        for _label, joints, depth, aspect, _moving in [clip for group in pools[label].values() for clip in group]:
+            if rng.random() >= ratio:
+                continue
+            partners = pools[before].get(round(float(aspect), 2))
+            if not partners:
+                continue
+            prefix = partners[int(rng.integers(len(partners)))]
+            tail = int(rng.integers(low, high + 1))
+            joined_j, joined_d = chain(prefix[1], prefix[2], joints, depth, tail, window)
+            xs.append(augmenter.moved(joined_j, joined_d, aspect, edges=False))
+            ys.append(label)
 
 
 def _pad(items):
