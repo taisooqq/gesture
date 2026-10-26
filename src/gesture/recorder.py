@@ -80,10 +80,20 @@ class VideoRecorder:
             return 0.0
         return time.perf_counter() - self.started
 
-    def _new_path(self, folder, tag):
+    def save_photo(self, tag, frame):
+        """무동작처럼 사진 태그는 jpg 한 장만 저장합니다."""
+        folder = self.settings.video_dir / tag
+        folder.mkdir(parents=True, exist_ok=True)
+        path = self._new_path(folder, tag, ".jpg")
+        image = resize_max_width(frame, self.settings.video_max_width)
+        if not cv2.imwrite(str(path), image, [int(cv2.IMWRITE_JPEG_QUALITY), 92]):
+            raise RuntimeError("사진 파일을 만들지 못했습니다.")
+        return path
+
+    def _new_path(self, folder, tag, suffix=".avi"):
         while True:
             token = uuid.uuid4().hex[:6]
-            path = folder / f"{tag}_{token}.avi"
+            path = folder / f"{tag}_{token}{suffix}"
             if not path.exists():
                 return path
 

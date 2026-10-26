@@ -76,6 +76,13 @@
       "detail": "앞으로가기후돌아오기",
       "train": true,
       "threshold": 0.65
+    },
+    {
+      "id": "idle",
+      "title": "무동작",
+      "detail": "움직이지 않는 손 자세를 사진으로 저장",
+      "train": true,
+      "threshold": 0.65
     }
   ]
 }

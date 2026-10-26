@@ -56,9 +56,29 @@ class TagStore:
                     "threshold": threshold,
                 }
             )
-        if changed:
+        tags, filled = self._ensure_defaults(tags)
+        if changed or filled:
             self.save(tags)
         return tags
+
+    def _ensure_defaults(self, tags):
+        """기본 태그가 JSON에 없으면 붙입니다. 무동작(사진) 태그를 빠뜨리지 않으려고다."""
+        have = {tag["id"] for tag in tags}
+        filled = False
+        for tag_id, title, detail in self.settings.video_tags:
+            if tag_id in have:
+                continue
+            tags.append(
+                {
+                    "id": tag_id,
+                    "title": title,
+                    "detail": detail,
+                    "train": tag_id in self.settings.train_tag_ids,
+                    "threshold": self.settings.conf_threshold,
+                }
+            )
+            filled = True
+        return tags, filled
 
     def save(self, tags):
         self.path.parent.mkdir(parents=True, exist_ok=True)

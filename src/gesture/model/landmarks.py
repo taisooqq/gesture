@@ -69,23 +69,18 @@ def _extract_many(settings, videos, complexity):
 
 
 def _extract_job(job):
-    """한 영상의 모든 프레임에서 손을 따로 찾습니다. 학습과 같은 static 모드입니다."""
+    """한 영상·사진의 프레임에서 손을 따로 찾습니다. 학습과 같은 static 모드입니다."""
     path, complexity = job
     hands = _hands(complexity)
-    cap = open_video(path)
+    frames = _read_frames(path)
     joints = []
     depth = []
     present = []
     aspect = 16 / 9
-    first = True
-    while True:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        if first:
+    for index, frame in enumerate(frames):
+        if index == 0:
             height, width = frame.shape[:2]
             aspect = width / max(height, 1)
-            first = False
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         rgb.flags.writeable = False
         results = hands.process(rgb)
@@ -98,7 +93,6 @@ def _extract_job(job):
             joints.append(np.zeros((21, 2)))
             depth.append(np.zeros(21))
             present.append(False)
-    cap.release()
     if not present:
         return np.zeros((0, 21, 2), np.float32), np.zeros((0, 21), np.float32), np.zeros(0, bool), aspect
     return (
@@ -107,6 +101,23 @@ def _extract_job(job):
         np.asarray(present, dtype=bool),
         float(aspect),
     )
+
+
+def _read_frames(path):
+    """영상은 모든 장, 사진은 한 장만 읽습니다."""
+    suffix = str(path).lower()
+    if suffix.endswith((".jpg", ".jpeg", ".png")):
+        frame = cv2.imread(str(path))
+        return [] if frame is None else [frame]
+    cap = open_video(path)
+    frames = []
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        frames.append(frame)
+    cap.release()
+    return frames
 
 
 def _hands(complexity):

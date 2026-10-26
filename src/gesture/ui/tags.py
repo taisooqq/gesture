@@ -55,6 +55,8 @@ class TagPane:
         self.tag = tag_id
         self._mark_selected()
         self._reload_clips()
+        if hasattr(self, "_update_capture_ui"):
+            self._update_capture_ui()
         row = self.tag_rows.get(tag_id)
         if row is not None:
             self.tag_scroll.ensureWidgetVisible(row)
@@ -111,6 +113,8 @@ class TagPane:
             self.cnn_score_button.setEnabled(not busy)
         if hasattr(self, "delete_clip_button"):
             self.delete_clip_button.setEnabled(self.clip_path is not None and not busy)
+        if hasattr(self, "_update_capture_ui"):
+            self._update_capture_ui()
 
     def _ask_tag(self, title, name="", detail="", train=False, threshold=None):
         dialog = QDialog(self.window)
@@ -206,4 +210,9 @@ class TagPane:
         folder = self.settings.video_dir / tag
         if not folder.exists():
             return 0
+        if tag in getattr(self.settings, "photo_tags", ()):
+            count = 0
+            for extension in self.settings.photo_extensions:
+                count += len(list(folder.glob(f"*{extension}")))
+            return count
         return len(list(folder.glob(f"{tag}_*.avi")))

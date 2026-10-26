@@ -45,6 +45,8 @@ env/
 
 # Project
 data/**/*.png
+data/**/*.jpg
+data/**/*.jpeg
 data/**/*.avi
 data/landmarks/
 

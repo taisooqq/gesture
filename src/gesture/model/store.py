@@ -87,7 +87,7 @@ class ModelStore:
     def train_motion(self):
         """같은 학습 영상으로 딥러닝 모델을 만듭니다. 랜덤포레스트 모델은 바꾸지 않습니다."""
         train_motion_model, save_motion_model = _torch_parts()
-        folders = self._tagged_videos()
+        folders = self._tagged_videos(include_photos=True)
         if folders is None:
             raise RuntimeError("저장된 영상이 없습니다. 먼저 태그를 골라 녹화하세요.")
         clips, tags, videos, tag_counts = self._motion_clips(folders)
@@ -128,7 +128,7 @@ class ModelStore:
         from gesture.model.motion import features
 
         train_motion_model, _save = _torch_parts()
-        train_groups, test_groups, skipped = self._split_folders()
+        train_groups, test_groups, skipped = self._split_folders(include_photos=True)
         clips, tags, _videos, _counts = self._motion_clips(train_groups)
         model = train_motion_model([clip[:5] for clip in clips], tags, self.settings)
         thresholds = self._thresholds_for(tags)
@@ -161,8 +161,8 @@ class ModelStore:
             extra = f"멈춘 손을 무동작으로 본 비율 {round(100 * held[0] / held[1])}%  {held[0]}/{held[1]}"
         return self._score_report([name for name in tags if name != "idle"], grouped, skipped, guess, extra)
 
-    def _split_folders(self):
-        folders = self._tagged_videos()
+    def _split_folders(self, include_photos=False):
+        folders = self._tagged_videos(include_photos=include_photos)
         if folders is None:
             raise RuntimeError("저장된 영상이 없습니다. 먼저 태그를 골라 녹화하세요.")
         train_groups = []
@@ -245,15 +245,16 @@ class ModelStore:
         return name
 
     def _samples(self):
-        folders = self._tagged_videos()
+        folders = self._tagged_videos(include_photos=False)
         if folders is None:
             return None
         return self._rows(folders, augment=True)
 
-    def _tagged_videos(self):
+    def _tagged_videos(self, include_photos=False):
         # 태그 목록에서 train 이 켜진 태그의 id 만 모은다. 폴더 이름과 같은 값이다.
         allowed = set(TagStore(self.settings).train_ids())
-        # 학습에 넣을 (태그 이름, avi 목록). 이름 순으로 쌓이므로 이 순서가 곧 클래스 번호가 된다.
+        photo_tags = set(self.settings.photo_tags)
+        # 학습에 넣을 (태그 이름, 파일 목록). 이름 순으로 쌓이므로 이 순서가 곧 클래스 번호가 된다.
         folders = []
         # 영상 폴더는 있는데 학습 태그와 안 맞는지, 아예 영상이 없는지 나중에 구분하려고 둔다.
         saw_video = False
@@ -264,12 +265,20 @@ class ModelStore:
                 # 태그 폴더가 아닌 파일은 건너뛴다.
                 if not folder.is_dir():
                     continue
-                # 그 태그 폴더 안의 avi 만, 파일 이름 순으로 고른다.
-                videos = sorted(folder.glob("*.avi"))
+                # 무동작 등은 사진, 나머지는 avi. 랜덤포레스트는 사진을 쓰지 않는다.
+                if folder.name in photo_tags:
+                    if not include_photos:
+                        continue
+                    videos = []
+                    for extension in self.settings.photo_extensions:
+                        videos.extend(folder.glob(f"*{extension}"))
+                    videos = sorted(videos)
+                else:
+                    videos = sorted(folder.glob("*.avi"))
                 # 빈 폴더는 영상이 있는 것으로 세지 않는다.
                 if not videos:
                     continue
-                # avi 가 하나라도 있으면, 학습 태그 여부와 관계없이 "영상은 있다"고 표시한다.
+                # 파일이 하나라도 있으면, 학습 태그 여부와 관계없이 "자료는 있다"고 표시한다.
                 saw_video = True
                 # 폴더 이름이 학습 태그 id 일 때만 학습 대상으로 넣는다.
                 if folder.name in allowed:
@@ -370,23 +379,33 @@ class ModelStore:
         window = int(self.settings.seq_window)
         need = int(self.settings.seq_min_frames)
         moving_tags = set(self.settings.moving_tags)
+        photo_exts = {item.lower() for item in self.settings.photo_extensions}
         found = []
         used_by_tag = {}
         for name, videos in folders:
             for path in videos:
                 frames, aspect = points[path]
                 kept = False
-                for part in windows(frames, window):
-                    joints, depth = stack_points(part)
-                    if joints is None or (joints.shape[0] < need and not allow_short):
+                is_photo = path.suffix.lower() in photo_exts
+                if is_photo:
+                    # 사진 무동작: 손 잡힌 한 장만 넣고, 학습 때 8~15장으로 늘린다.
+                    joints, depth = stack_points(frames)
+                    if joints is None or joints.shape[0] < 1:
                         continue
-                    found.append((name, joints, depth, aspect, name in moving_tags, path))
+                    found.append((name, joints, depth, aspect, False, path))
                     kept = True
+                else:
+                    for part in windows(frames, window):
+                        joints, depth = stack_points(part)
+                        if joints is None or (joints.shape[0] < need and not allow_short):
+                            continue
+                        found.append((name, joints, depth, aspect, name in moving_tags, path))
+                        kept = True
                 if kept:
                     used_by_tag.setdefault(name, []).append(path.relative_to(self.settings.video_dir).as_posix())
         if tags is None:
             tags = [name for name, _videos in folders if name in used_by_tag]
-            if any(name in moving_tags for name in tags):
+            if "idle" not in tags and any(name in moving_tags for name in tags):
                 tags.append("idle")
         if not found:
             raise RuntimeError("영상에서 손을 찾지 못했습니다. 중앙 박스 안에서 다시 녹화하세요.")

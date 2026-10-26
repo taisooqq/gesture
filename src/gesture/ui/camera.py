@@ -43,6 +43,8 @@ class CameraPane:
     # 커서를 클릭보다 먼저 옮긴다. 클릭을 먼저 보내면 검지가 내려간 다음 자리를 누르게 된다.
     def _show(self, frame):
         roi, record_box = self.analyzer.crop(frame)
+        # 등록 탭 사진 저장용. 녹화와 같은 중앙 박스다.
+        self._register_roi = roi
         label, conf = self._predict(frame)
         label, conf = self._gate(label, conf)
         # 인식 탭의 초록 박스는 포인터 영역이다. 등록 탭 네모는 녹화 영역이라 더 작다.

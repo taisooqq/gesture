@@ -79,6 +79,9 @@ class Settings:
         self.pointer_scale = 0.8
         self.data_dir = self.root / "data"
         self.video_dir = self.data_dir / "videos"
+        # 사진으로만 모으는 태그. 무동작은 jpg 한 장을 8~15장으로 늘려 학습한다.
+        self.photo_tags = ("idle",)
+        self.photo_extensions = (".jpg", ".jpeg", ".png")
         # 영상마다 한 번 뽑은 손 좌표. 영상이 바뀌면 다시 뽑는다.
         self.landmark_dir = self.data_dir / "landmarks"
         # 손 좌표를 뽑는 프로세스 수. None 이면 코어 수에서 하나를 뺀다.
@@ -132,6 +135,7 @@ class Settings:
             "screenshot",
             "scroll_up",
             "scroll_down",
+            "idle",
         )
         self.video_tags = (
             ("left_click_on", "마우스 좌클릭 누르기", "검지를 핀상태에서 엄지 접기"),
@@ -145,6 +149,7 @@ class Settings:
             ("screenshot", "스크린샷", "중지올리기"),
             ("scroll_up", "위로 스크롤", "따봉"),
             ("scroll_down", "아래로 스크롤", "로키 따봉"),
+            ("idle", "무동작", "움직이지 않는 손 자세를 사진으로 저장"),
         )
         self.model_path = self.root / "models" / "gesture.joblib"
 

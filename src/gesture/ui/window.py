@@ -172,7 +172,8 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         controls.addWidget(self.stop_button)
         controls.addStretch(1)
         self.register_status = QLabel(
-            "태그를 고른 뒤 녹화합니다. 저장 영상은 중앙 박스, 가로 640, 15fps 입니다."
+            "태그를 고른 뒤 녹화합니다. 무동작은 사진 버튼으로 한 장 저장합니다. "
+            "저장은 중앙 박스, 가로는 640입니다."
         )
         self.register_status.setWordWrap(True)
         self.clip_image = self._video_label(180)

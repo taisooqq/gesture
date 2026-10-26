@@ -90,6 +90,11 @@ def _epoch_samples(clips, augmenter, idle, rng, tags, settings):
     xs = []
     ys = []
     for label, joints, depth, aspect, moving in clips:
+        # 사진 무동작처럼 한 장인 묶음은 앞·끝 무동작과 같이 8~15장으로 늘린다.
+        if joints.shape[0] <= 1:
+            xs.append(augmenter.held(joints, depth, aspect, 0))
+            ys.append(label)
+            continue
         xs.append(augmenter.moved(joints, depth, aspect))
         ys.append(label)
         if moving and idle is not None:
