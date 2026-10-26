@@ -124,42 +124,77 @@ class ModelStore:
         return self._score_report(tags, tests, skipped, guess)
 
     def evaluate_motion(self):
-        """딥러닝으로 태그마다 영상의 20%를 빼고 맞힌 비율을 계산합니다. 모델은 저장하지 않습니다."""
+        """딥러닝 3-way split(7:2:1). 학습·검증·시험. 모델은 저장하지 않습니다."""
         from gesture.model.motion import features
 
         train_motion_model, _save = _torch_parts()
-        train_groups, test_groups, skipped = self._split_folders(include_photos=True)
+        train_groups, val_groups, test_groups, skipped = self._split_folders_three_way(
+            include_photos=True
+        )
         clips, tags, _videos, _counts = self._motion_clips(train_groups)
         model = train_motion_model([clip[:5] for clip in clips], tags, self.settings)
         thresholds = self._thresholds_for(tags)
+        report_tags = [name for name in tags if name != "idle"]
 
         def guess(sequence):
             return self._guess(model.predict_proba(sequence), model.classes_, tags, thresholds)
 
-        test_folders = [(name, videos) for name, videos in test_groups if name in tags]
-        skipped.extend(name for name, _videos in test_groups if name not in tags)
-        test_clips, _tags, _used, _counts = self._motion_clips(test_folders, tags=tags, allow_short=True)
+        val_grouped, val_skip = self._motion_eval_groups(val_groups, tags, features)
+        test_grouped, test_skip, held = self._motion_eval_groups(
+            test_groups, tags, features, guess=guess, score_held=True
+        )
+        skipped = list(skipped) + val_skip + test_skip
+        val_report = self._score_report(report_tags, val_grouped, [], guess)
+        held_extra = None
+        if held[1]:
+            held_extra = f"멈춘 손을 무동작으로 본 비율 {round(100 * held[0] / held[1])}%  {held[0]}/{held[1]}"
+        test_report = self._score_report(report_tags, test_grouped, skipped, guess, held_extra)
+        detail = "\n".join(
+            [
+                "3-way split  학습 70% · 검증 20% · 시험 10%",
+                "",
+                "[검증]",
+                val_report["detail"],
+                "",
+                "[시험]",
+                test_report["detail"],
+            ]
+        )
+        summary = f"시험 {test_report['summary']} · 검증 {val_report['summary'].split('  ')[0]}"
+        return {"summary": summary, "detail": detail}
+
+    def _motion_eval_groups(self, groups, tags, features, guess=None, score_held=False):
+        """시험·검증용 묶음을 만듭니다. score_held 이면 앞·끝 멈춤→무동작 비율도 셉니다."""
+        folders = [(name, videos) for name, videos in groups if name in tags]
+        skipped = [name for name, _videos in groups if name not in tags]
+        if not folders:
+            if score_held:
+                return [], skipped, [0, 0]
+            return [], skipped
+        clips, _tags, _used, _counts = self._motion_clips(folders, tags=tags, allow_short=True)
         tests = {}
         held = [0, 0]
         rng = np.random.default_rng(1)
-        for label, joints, depth, aspect, moving, video in test_clips:
-            tests.setdefault(tags[label], {}).setdefault(video, []).append(features(joints, depth, aspect))
-            if not moving:
+        for label, joints, depth, aspect, moving, video in clips:
+            tests.setdefault(tags[label], {}).setdefault(video, []).append(
+                features(joints, depth, aspect)
+            )
+            if not score_held or not moving or guess is None:
                 continue
-            # 움직여야 하는 동작의 처음·끝 자세로 멈춘 손은 무동작이어야 한다.
             for index in (0, joints.shape[0] - 1):
                 still_j = np.repeat(joints[index : index + 1], self.settings.seq_window, axis=0)
                 still_d = np.repeat(depth[index : index + 1], self.settings.seq_window, axis=0)
                 scale = float(np.linalg.norm(joints[index, 9] - joints[index, 0]))
-                still_j = still_j + rng.normal(0.0, 0.01 * scale, size=still_j.shape).astype(np.float32)
+                still_j = still_j + rng.normal(0.0, 0.01 * scale, size=still_j.shape).astype(
+                    np.float32
+                )
                 held[1] += 1
                 if guess(features(still_j, still_d, aspect)) in (None, "idle"):
                     held[0] += 1
         grouped = [(name, list(videos.values())) for name, videos in tests.items()]
-        extra = None
-        if held[1]:
-            extra = f"멈춘 손을 무동작으로 본 비율 {round(100 * held[0] / held[1])}%  {held[0]}/{held[1]}"
-        return self._score_report([name for name in tags if name != "idle"], grouped, skipped, guess, extra)
+        if score_held:
+            return grouped, skipped, held
+        return grouped, skipped
 
     def _split_folders(self, include_photos=False):
         folders = self._tagged_videos(include_photos=include_photos)
@@ -178,6 +213,29 @@ class ModelStore:
         if len(train_groups) < 2:
             raise RuntimeError("인식률을 보려면 영상이 2개 이상인 태그가 2종류 있어야 합니다.")
         return train_groups, test_groups, skipped
+
+    def _split_folders_three_way(self, include_photos=False):
+        """딥러닝 인식률용. 태그마다 학습 70% · 검증 20% · 시험 10%."""
+        folders = self._tagged_videos(include_photos=include_photos)
+        if folders is None:
+            raise RuntimeError("저장된 영상이 없습니다. 먼저 태그를 골라 녹화하세요.")
+        train_groups = []
+        val_groups = []
+        test_groups = []
+        skipped = []
+        for name, videos in folders:
+            if len(videos) < 3:
+                skipped.append(name)
+                continue
+            train_paths, val_paths, test_paths = _split_videos_three_way(videos)
+            train_groups.append((name, train_paths))
+            val_groups.append((name, val_paths))
+            test_groups.append((name, test_paths))
+        if len(train_groups) < 2:
+            raise RuntimeError(
+                "딥러닝 인식률은 영상이 3개 이상인 태그가 2종류 있어야 합니다. (학습·검증·시험)"
+            )
+        return train_groups, val_groups, test_groups, skipped
 
     def _score_report(self, tags, tests, skipped, guess, extra=None):
         """시험 영상을 증강 없이 맞춰 보고, 태그별 비율을 만듭니다. tests 는 (태그, 영상별 묶음 목록) 입니다."""
@@ -511,6 +569,30 @@ def _split_videos(paths, ratio=0.2):
     if hold >= len(items):
         hold = len(items) - 1
     return items[hold:], items[:hold]
+
+
+def _split_videos_three_way(paths, train_ratio=0.7, val_ratio=0.2, test_ratio=0.1):
+    """학습·검증·시험으로 나눕니다. 각 구간에 최소 1개씩 둡니다."""
+    items = list(paths)
+    random.Random(0).shuffle(items)
+    count = len(items)
+    if count < 3:
+        raise ValueError("3-way split 에는 영상이 3개 이상 필요합니다.")
+    n_test = max(1, int(round(count * test_ratio)))
+    n_val = max(1, int(round(count * val_ratio)))
+    if n_test + n_val >= count:
+        n_test = 1
+        n_val = 1
+    n_train = count - n_test - n_val
+    if n_train < 1:
+        n_test = 1
+        n_val = 1
+        n_train = count - 2
+    test = items[:n_test]
+    val = items[n_test : n_test + n_val]
+    train = items[n_test + n_val :]
+    assert len(train) == n_train
+    return train, val, test
 
 
 def _forest():

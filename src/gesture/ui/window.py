@@ -149,7 +149,9 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         self.cnn_button.clicked.connect(self._train_cnn)
         self.cnn_score_button.clicked.connect(self._score_cnn)
         self.cnn_button.setToolTip("최근 1초의 자세와 움직임을 프레임 순서대로 학습합니다. 랜덤포레스트 모델은 그대로 둡니다.")
-        self.cnn_score_button.setToolTip("딥러닝으로 태그마다 영상의 20%를 빼고 맞힌 비율을 봅니다. 모델은 저장하지 않습니다.")
+        self.cnn_score_button.setToolTip(
+            "딥러닝 3-way split(학습 70% · 검증 20% · 시험 10%). 모델은 저장하지 않습니다."
+        )
         cnn_row.addWidget(self.cnn_button)
         cnn_row.addWidget(self.cnn_score_button)
         self.model_list = QListWidget()
