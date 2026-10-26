@@ -37,7 +37,7 @@
       "title": "앞으로가기",
       "detail": "손바닥을 세우고 왼쪽에서 오른쪽으로 움직임",
       "train": true,
-      "threshold": 0.8,
+      "threshold": 0.65,
       "photo": false
     },
     {
