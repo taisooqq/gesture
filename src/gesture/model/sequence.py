@@ -97,14 +97,17 @@ def _epoch_samples(clips, augmenter, idle, rng, tags, settings):
             for index in (0, joints.shape[0] - 1):
                 xs.append(augmenter.held(joints, depth, aspect, index))
                 ys.append(idle)
-        elif not moving and rng.random() < 0.25:
+        elif (
+            not moving
+            and label not in hold_pose
+            and idle is not None
+            and rng.random() < 0.25
+        ):
+            # 우클릭·새로고침·스크린샷: 멈춘 손 → 무동작.
+            # 스크롤(hold_pose)은 영상 전체가 유지 자세라 무동작 합성에 넣지 않는다.
             held = augmenter.held(joints, depth, aspect, int(rng.integers(0, joints.shape[0])))
             xs.append(held)
-            # 스크롤만 멈춘 손을 그 동작으로 둔다. 우클릭 등은 멈춘 손을 무동작으로 둔다.
-            if label in hold_pose:
-                ys.append(label)
-            elif idle is not None:
-                ys.append(idle)
+            ys.append(idle)
     return xs, ys
 
 

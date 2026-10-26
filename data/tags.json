@@ -54,14 +54,14 @@
       "title": "위로 스크롤",
       "detail": "따봉",
       "train": true,
-      "threshold": 0.65
+      "threshold": 0.8
     },
     {
       "id": "scroll_down",
       "title": "아래로 스크롤",
       "detail": "로키 따봉",
       "train": true,
-      "threshold": 0.65
+      "threshold": 0.75
     },
     {
       "id": "back_idle",
