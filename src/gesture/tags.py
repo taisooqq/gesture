@@ -6,9 +6,11 @@ import re
 from gesture.config import clamp_threshold
 from gesture.config import settings as default_settings
 
+_FOLDER_ID = re.compile(r"^[a-z][a-z0-9_]*$")
+
 
 class TagStore:
-    """data/tags.json. 없으면 기본 태그 9개를 만들어 저장합니다."""
+    """data/tags.json. 없으면 기본 태그를 만들어 저장합니다."""
 
     def __init__(self, settings=None):
         self.settings = settings or default_settings
@@ -23,6 +25,7 @@ class TagStore:
                     "detail": detail,
                     "train": tag_id in self.settings.train_tag_ids,
                     "threshold": self.settings.conf_threshold,
+                    "photo": tag_id in self.settings.photo_tags,
                 }
                 for tag_id, title, detail in self.settings.video_tags
             ]
@@ -31,6 +34,7 @@ class TagStore:
         raw = json.loads(self.path.read_text(encoding="utf-8"))
         tags = []
         changed = False
+        defaults_photo = set(self.settings.photo_tags)
         for item in raw.get("tags", []):
             if not isinstance(item, dict):
                 continue
@@ -47,6 +51,11 @@ class TagStore:
             threshold = clamp_threshold(item.get("threshold", self.settings.conf_threshold))
             if item.get("threshold") != threshold:
                 changed = True
+            if isinstance(item.get("photo"), bool):
+                photo = item["photo"]
+            else:
+                photo = tag_id in defaults_photo
+                changed = True
             tags.append(
                 {
                     "id": tag_id,
@@ -54,6 +63,7 @@ class TagStore:
                     "detail": detail,
                     "train": train,
                     "threshold": threshold,
+                    "photo": photo,
                 }
             )
         tags, filled = self._ensure_defaults(tags)
@@ -75,6 +85,7 @@ class TagStore:
                     "detail": detail,
                     "train": tag_id in self.settings.train_tag_ids,
                     "threshold": self.settings.conf_threshold,
+                    "photo": tag_id in self.settings.photo_tags,
                 }
             )
             filled = True
@@ -88,20 +99,30 @@ class TagStore:
     def train_ids(self):
         return [tag["id"] for tag in self.load() if tag.get("train")]
 
-    def add(self, title, detail, train=False, threshold=None):
+    def photo_ids(self):
+        """사진(무동작)으로 저장하는 태그 id 목록."""
+        return {tag["id"] for tag in self.load() if tag.get("photo")}
+
+    def add(self, title, detail, train=False, threshold=None, folder_id=None, photo=False):
         tags = self.load()
+        tag_id = self._normalize_id(folder_id)
+        if not tag_id:
+            tag_id = self._new_id(tags)
+        if any(tag["id"] == tag_id for tag in tags):
+            raise ValueError(f"폴더명 '{tag_id}' 이(가) 이미 있습니다.")
         tag = {
-            "id": self._new_id(tags),
+            "id": tag_id,
             "title": title.strip(),
             "detail": detail.strip(),
             "train": bool(train),
             "threshold": self._threshold(threshold),
+            "photo": bool(photo),
         }
         tags.append(tag)
         self.save(tags)
         return tag
 
-    def update(self, tag_id, title, detail, train=False, threshold=None):
+    def update(self, tag_id, title, detail, train=False, threshold=None, photo=None):
         tags = self.load()
         for tag in tags:
             if tag["id"] == tag_id:
@@ -109,6 +130,8 @@ class TagStore:
                 tag["detail"] = detail.strip()
                 tag["train"] = bool(train)
                 tag["threshold"] = self._threshold(threshold)
+                if photo is not None:
+                    tag["photo"] = bool(photo)
                 break
         self.save(tags)
 
@@ -120,6 +143,17 @@ class TagStore:
     def delete(self, tag_id):
         tags = [tag for tag in self.load() if tag["id"] != tag_id]
         self.save(tags)
+
+    def _normalize_id(self, value):
+        """폴더명: 영문 소문자로 시작하고, 소문자·숫자·_ 만 허용합니다."""
+        if value is None:
+            return None
+        text = str(value).strip().lower()
+        if not text:
+            return None
+        if not _FOLDER_ID.fullmatch(text):
+            raise ValueError("폴더명은 영문 소문자로 시작하고, 소문자·숫자·_ 만 쓸 수 있습니다.")
+        return text
 
     def _new_id(self, tags):
         numbers = []

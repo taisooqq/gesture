@@ -79,7 +79,7 @@ class Settings:
         self.pointer_scale = 0.8
         self.data_dir = self.root / "data"
         self.video_dir = self.data_dir / "videos"
-        # 사진으로만 모으는 태그. 무동작은 jpg 한 장을 8~15장으로 늘려 학습한다.
+        # 기본 무동작 태그. 추가로 만든 사진 태그는 tags.json 의 photo 로 구분한다.
         self.photo_tags = ("idle",)
         self.photo_extensions = (".jpg", ".jpeg", ".png")
         # 영상마다 한 번 뽑은 손 좌표. 영상이 바뀌면 다시 뽑는다.

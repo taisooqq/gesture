@@ -19,7 +19,10 @@ class ClipPane:
 
     def _is_photo_tag(self, tag=None):
         name = self.tag if tag is None else tag
-        return name in getattr(self.settings, "photo_tags", ())
+        for item in getattr(self, "tags", []) or []:
+            if item["id"] == name:
+                return bool(item.get("photo"))
+        return name in self.tags_store.photo_ids()
 
     def _toggle_record(self):
         if self._is_photo_tag():

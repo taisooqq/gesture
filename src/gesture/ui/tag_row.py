@@ -26,6 +26,8 @@ class TagRow(QFrame):
         text.addWidget(self.title_label)
         text.addWidget(self.detail_label)
         marks = []
+        if tag.get("photo"):
+            marks.append("사진·무동작")
         if tag.get("train"):
             marks.append("학습")
         marks.append(f"점수 {round(float(tag.get('threshold', 0.65)) * 100)}%")

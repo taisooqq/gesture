@@ -1,13 +1,16 @@
 """등록 탭의 태그 목록과 추가·수정·삭제."""
 
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
+    QRadioButton,
     QSpinBox,
 )
 
@@ -116,12 +119,43 @@ class TagPane:
         if hasattr(self, "_update_capture_ui"):
             self._update_capture_ui()
 
-    def _ask_tag(self, title, name="", detail="", train=False, threshold=None):
+    def _ask_tag(
+        self,
+        title,
+        name="",
+        detail="",
+        train=False,
+        threshold=None,
+        folder_id="",
+        photo=False,
+        create=False,
+    ):
         dialog = QDialog(self.window)
         dialog.setWindowTitle(title)
-        dialog.setMinimumWidth(360)
+        dialog.setMinimumWidth(400)
         form = QFormLayout(dialog)
+        kind_row = QHBoxLayout()
+        video_radio = QRadioButton("동작 (영상)")
+        photo_radio = QRadioButton("무동작 (사진)")
+        kind_group = QButtonGroup(dialog)
+        kind_group.addButton(video_radio)
+        kind_group.addButton(photo_radio)
+        (photo_radio if photo else video_radio).setChecked(True)
+        kind_row.addWidget(video_radio)
+        kind_row.addWidget(photo_radio)
+        kind_row.addStretch(1)
+        form.addRow("종류", kind_row)
+        folder_edit = QLineEdit(folder_id)
+        folder_edit.setPlaceholderText("예: idle_fist  (영문 소문자, 숫자, _)")
+        folder_edit.setToolTip("data/videos/ 아래 폴더 이름입니다. 만든 뒤에는 바꿀 수 없습니다.")
+        if create:
+            form.addRow("폴더명", folder_edit)
+        else:
+            folder_label = QLabel(folder_id or "(없음)")
+            folder_label.setStyleSheet("color: #6e6e73;")
+            form.addRow("폴더명", folder_label)
         name_edit = QLineEdit(name)
+        name_edit.setPlaceholderText("예: 무동작 주먹")
         detail_edit = QLineEdit(detail)
         train_box = QCheckBox("학습에 사용")
         train_box.setChecked(train)
@@ -148,18 +182,36 @@ class TagPane:
         if not name:
             self.register_status.setText("이름을 입력하세요.")
             return None
-        return name, detail_edit.text().strip(), train_box.isChecked(), score.value() / 100
+        return {
+            "title": name,
+            "detail": detail_edit.text().strip(),
+            "train": train_box.isChecked(),
+            "threshold": score.value() / 100,
+            "photo": photo_radio.isChecked(),
+            "folder_id": folder_edit.text().strip() if create else folder_id,
+        }
 
     def _add_tag(self):
         if self.recorder.recording:
             return
-        result = self._ask_tag("태그 추가")
+        result = self._ask_tag("태그 추가", create=True)
         if result is None:
             return
-        name, detail, train, threshold = result
-        tag = self.tags_store.add(name, detail, train, threshold)
+        try:
+            tag = self.tags_store.add(
+                result["title"],
+                result["detail"],
+                result["train"],
+                result["threshold"],
+                folder_id=result["folder_id"] or None,
+                photo=result["photo"],
+            )
+        except ValueError as exc:
+            self.register_status.setText(str(exc))
+            return
         self._reload_tags(keep=tag["id"])
-        self.register_status.setText(f"태그를 추가했습니다. {name}")
+        kind = "사진 무동작" if tag.get("photo") else "영상"
+        self.register_status.setText(f"태그를 추가했습니다. {tag['title']} · {kind} · {tag['id']}")
 
     def _edit_tag(self):
         if self.recorder.recording or not self.tag:
@@ -171,13 +223,22 @@ class TagPane:
             current["detail"],
             current.get("train", False),
             current.get("threshold", self.settings.conf_threshold),
+            folder_id=current["id"],
+            photo=bool(current.get("photo")),
+            create=False,
         )
         if result is None:
             return
-        name, detail, train, threshold = result
-        self.tags_store.update(self.tag, name, detail, train, threshold)
+        self.tags_store.update(
+            self.tag,
+            result["title"],
+            result["detail"],
+            result["train"],
+            result["threshold"],
+            photo=result["photo"],
+        )
         self._reload_tags(keep=self.tag)
-        self.register_status.setText(f"태그를 수정했습니다. {name}")
+        self.register_status.setText(f"태그를 수정했습니다. {result['title']}")
 
     def _delete_tag(self):
         if self.recorder.recording or not self.tag:
@@ -210,7 +271,8 @@ class TagPane:
         folder = self.settings.video_dir / tag
         if not folder.exists():
             return 0
-        if tag in getattr(self.settings, "photo_tags", ()):
+        photo = any(item["id"] == tag and item.get("photo") for item in self.tags)
+        if photo:
             count = 0
             for extension in self.settings.photo_extensions:
                 count += len(list(folder.glob(f"*{extension}")))

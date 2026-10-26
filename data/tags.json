@@ -5,84 +5,104 @@
       "title": "마우스 좌클릭 누르기",
       "detail": "검지를 핀상태에서 엄지 접기",
       "train": true,
-      "threshold": 0.85
+      "threshold": 0.85,
+      "photo": false
     },
     {
       "id": "left_click_off",
       "title": "마우스 좌클릭 떼기",
       "detail": "접은 엄지 펴기",
       "train": true,
-      "threshold": 0.7
+      "threshold": 0.7,
+      "photo": false
     },
     {
       "id": "right_click",
       "title": "우클릭",
       "detail": "엄지와  검지를 제외한 나머지 손가락이 맞닿음",
       "train": true,
-      "threshold": 0.9
+      "threshold": 0.9,
+      "photo": false
     },
     {
       "id": "back",
       "title": "뒤로가기",
       "detail": "손바닥을 세우고 오른쪽에서 왼쪽으로 움직임",
       "train": true,
-      "threshold": 0.6
+      "threshold": 0.6,
+      "photo": false
     },
     {
       "id": "forward",
       "title": "앞으로가기",
       "detail": "손바닥을 세우고 왼쪽에서 오른쪽으로 움직임",
       "train": true,
-      "threshold": 0.8
+      "threshold": 0.8,
+      "photo": false
     },
     {
       "id": "refresh",
       "title": "새로고침",
       "detail": "새끼손가락 올림",
       "train": true,
-      "threshold": 0.95
+      "threshold": 0.95,
+      "photo": false
     },
     {
       "id": "screenshot",
       "title": "스크린샷",
       "detail": "영역전개",
       "train": true,
-      "threshold": 0.8
+      "threshold": 0.8,
+      "photo": false
     },
     {
       "id": "scroll_up",
       "title": "위로 스크롤",
       "detail": "따봉",
       "train": true,
-      "threshold": 0.8
+      "threshold": 0.8,
+      "photo": false
     },
     {
       "id": "scroll_down",
       "title": "아래로 스크롤",
       "detail": "로키 따봉",
       "train": true,
-      "threshold": 0.75
+      "threshold": 0.75,
+      "photo": false
     },
     {
       "id": "back_idle",
       "title": "뒤로가기후돌아오기",
       "detail": "뒤로가기후돌아오기",
       "train": true,
-      "threshold": 0.65
+      "threshold": 0.65,
+      "photo": false
     },
     {
       "id": "forward_idle",
       "title": "앞으로가기후돌아오기",
       "detail": "앞으로가기후돌아오기",
       "train": true,
-      "threshold": 0.65
+      "threshold": 0.65,
+      "photo": false
     },
     {
       "id": "idle",
       "title": "무동작",
       "detail": "움직이지 않는 손 자세를 사진으로 저장",
       "train": true,
-      "threshold": 0.65
+      "threshold": 0.65,
+      "photo": true
+    },
+    {
+      "id": "idle_click",
+      "title": "무동작_좌클릭",
+      "detail": "",
+      "train": true,
+      "threshold": 0.65,
+      "photo": true
     }
   ]
 }

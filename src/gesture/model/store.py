@@ -253,7 +253,7 @@ class ModelStore:
     def _tagged_videos(self, include_photos=False):
         # 태그 목록에서 train 이 켜진 태그의 id 만 모은다. 폴더 이름과 같은 값이다.
         allowed = set(TagStore(self.settings).train_ids())
-        photo_tags = set(self.settings.photo_tags)
+        photo_tags = TagStore(self.settings).photo_ids()
         # 학습에 넣을 (태그 이름, 파일 목록). 이름 순으로 쌓이므로 이 순서가 곧 클래스 번호가 된다.
         folders = []
         # 영상 폴더는 있는데 학습 태그와 안 맞는지, 아예 영상이 없는지 나중에 구분하려고 둔다.
