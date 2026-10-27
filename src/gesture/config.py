@@ -107,6 +107,16 @@ class Settings:
         self.seq_window = 15
         self.seq_min_frames = 3
         self.seq_epochs = 50
+        # 파인튜닝. 고른 딥러닝 모델을 이 컴퓨터에서 새로 찍은 영상으로 이어서 학습한다.
+        # 처음 학습(학습률 0.001, 50회차)보다 약하게 해서, 이미 배운 것을 크게 흔들지 않는다.
+        self.finetune_epochs = 15
+        self.finetune_lr = 1e-4
+        # 새 영상은 한 회차에 이 횟수만큼 넣는다. 이 컴퓨터에 있는 예전 영상은 한 번씩 복습한다.
+        self.finetune_new_repeat = 3
+        # 기반 모델의 점수를 따라가게 하는 세기. 0이면 끈다. 이 컴퓨터에 없는 동작을 잊지 않게 한다.
+        self.finetune_distill = 1.0
+        # 점수를 부드럽게 비교하는 온도. 1보다 크면 1등이 아닌 동작의 점수도 같이 배운다.
+        self.finetune_temperature = 2.0
         # 동작 점수가 무동작보다 이만큼 더 높을 때만 그 동작으로 본다. 오인을 줄인다.
         self.idle_margin = 0.15
         # 움직여야 그 동작인 태그. 처음·끝 자세로 멈춘 손은 딥러닝이 무동작으로 배운다.

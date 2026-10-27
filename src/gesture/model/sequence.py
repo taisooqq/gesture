@@ -84,6 +84,105 @@ def train_motion_model(clips, tags, settings, seed=0):
     return MotionModel(network, tags, settings.seq_window)
 
 
+# 파인튜닝. 다른 컴퓨터에서 학습한 모델을, 이 컴퓨터에서 새로 찍은 영상으로 이어서 학습한다.
+# 1) 기반 모델의 가중치와 입력 정규화 값을 그대로 가져온다. 새 태그가 있으면 출력 칸만 늘린다.
+# 2) 새 영상은 한 회차에 finetune_new_repeat 번 넣어 더 많이 배운다. 이 컴퓨터에 있는 예전 영상은 복습용이다.
+# 3) 이 컴퓨터에 없는 동작(예: 우클릭)을 잊지 않게, 기반 모델의 점수를 따라가도록 같이 학습한다.
+#    (지식 증류, Learning without Forgetting) 세기는 finetune_distill, 부드럽게 하는 온도는 finetune_temperature.
+# 4) 학습률은 처음 학습보다 낮게, 회차는 짧게 한다. 이미 배운 것을 크게 흔들지 않으려는 것이다.
+def finetune_motion_model(base, clips, fresh, tags, settings, seed=0):
+    """base 는 MotionModel, clips 는 (태그 번호, 관절, 깊이, 화면 비율, 움직이는지), fresh 는 clips 와 같은 길이의 새 영상 여부입니다."""
+    import copy
+
+    import torch
+    from torch import nn
+    from torch.nn import functional as F
+
+    rng = np.random.default_rng(seed)
+    torch.manual_seed(seed)
+    old_count = len(base.tags)
+    if list(tags[:old_count]) != list(base.tags):
+        raise RuntimeError("기반 모델의 태그 순서가 맞지 않습니다.")
+    teacher = copy.deepcopy(base.network)
+    teacher.eval()
+    for parameter in teacher.parameters():
+        parameter.requires_grad_(False)
+    network = _grown_network(base.network, len(tags))
+    device = _device()
+    network.to(device)
+    teacher.to(device)
+    idle = tags.index("idle") if "idle" in tags else None
+    repeat = max(1, int(settings.finetune_new_repeat))
+    pool = []
+    for clip, is_new in zip(clips, fresh):
+        pool.extend([clip] * (repeat if is_new else 1))
+    counts = np.zeros(len(tags), dtype=np.float64)
+    for label, _joints, _depth, _aspect, moving in pool:
+        counts[label] += 1.0
+        if moving and idle is not None:
+            counts[idle] += 2.0
+    weights = torch.tensor(counts.sum() / np.maximum(counts, 1.0) / len(tags), dtype=torch.float32, device=device)
+    loss_fn = nn.CrossEntropyLoss(weight=weights)
+    optimizer = torch.optim.Adam(network.parameters(), lr=float(settings.finetune_lr), weight_decay=1e-4)
+    distill = float(settings.finetune_distill)
+    temperature = float(settings.finetune_temperature)
+    augmenter = Augmenter(settings, rng)
+    batch = 64
+    for _epoch in range(int(settings.finetune_epochs)):
+        xs, ys = _epoch_samples(pool, augmenter, idle, rng, tags, settings)
+        order = rng.permutation(len(xs))
+        network.train()
+        for start in range(0, len(order), batch):
+            chosen = order[start : start + batch]
+            padded, lengths = _pad([xs[index] for index in chosen])
+            padded = padded.to(device)
+            lengths = lengths.to(device)
+            target = torch.from_numpy(np.asarray([ys[index] for index in chosen], dtype=np.int64)).to(device)
+            optimizer.zero_grad()
+            logits = network(padded, lengths)
+            loss = loss_fn(logits, target)
+            if distill > 0:
+                # 예전 태그 칸만 기반 모델 점수와 비교한다. 새 태그 칸은 기반 모델에 없다.
+                with torch.no_grad():
+                    soft = F.softmax(teacher(padded, lengths) / temperature, dim=1)
+                guess = F.log_softmax(logits[:, :old_count] / temperature, dim=1)
+                loss = loss + distill * (temperature**2) * F.kl_div(guess, soft, reduction="batchmean")
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(network.parameters(), 1.0)
+            optimizer.step()
+    network.to("cpu")
+    network.eval()
+    return MotionModel(network, tags, base.window)
+
+
+def _grown_network(network, class_count):
+    """기반 모델을 복사합니다. 태그가 늘었으면 마지막 점수 층에 칸을 더하고, 예전 칸은 그대로 둡니다."""
+    import torch
+
+    features_count = int(network.conv1.in_channels)
+    hidden = int(network.conv1.out_channels)
+    grown = _network(
+        features_count,
+        class_count,
+        network.mean.detach().cpu().numpy(),
+        network.std.detach().cpu().numpy(),
+        hidden,
+    )
+    state = {key: value.detach().cpu().clone() for key, value in network.state_dict().items()}
+    old = state["fc.weight"].shape[0]
+    if class_count > old:
+        fresh = grown.state_dict()
+        weight = fresh["fc.weight"].clone()
+        bias = fresh["fc.bias"].clone()
+        weight[:old] = state["fc.weight"]
+        bias[:old] = state["fc.bias"]
+        state["fc.weight"] = weight
+        state["fc.bias"] = bias
+    with torch.no_grad():
+        grown.load_state_dict(state)
+    return grown
+
+
 def _epoch_samples(clips, augmenter, idle, rng, tags, settings):
     """한 회차의 학습 묶음. 매번 다르게 바꾼 좌표와, 멈춘 손 장면을 섞습니다."""
     hold_pose = {index for index, name in enumerate(tags) if name in settings.hold_pose_tags}

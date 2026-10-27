@@ -103,6 +103,14 @@
       "train": true,
       "threshold": 0.65,
       "photo": true
+    },
+    {
+      "id": "idle_back",
+      "title": "무동작_뒤로가기",
+      "detail": "",
+      "train": true,
+      "threshold": 0.65,
+      "photo": true
     }
   ]
 }

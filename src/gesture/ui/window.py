@@ -152,11 +152,18 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         self.cnn_score_button.setToolTip("딥러닝으로 태그마다 영상의 20%를 빼고 맞힌 비율을 봅니다. 모델은 저장하지 않습니다.")
         cnn_row.addWidget(self.cnn_button)
         cnn_row.addWidget(self.cnn_score_button)
+        self.finetune_button = QPushButton("파인튜닝")
+        self.finetune_button.clicked.connect(self._finetune)
+        self.finetune_button.setToolTip(
+            "목록에서 고른 딥러닝 모델을, 이 컴퓨터에서 새로 찍은 영상으로 이어서 학습합니다. "
+            "결과는 새 모델로 저장되고, 고른 모델은 그대로 남습니다."
+        )
         self.model_list = QListWidget()
         self.model_list.currentItemChanged.connect(self._select_model)
         model_layout.addWidget(model_header)
         model_layout.addLayout(train_row)
         model_layout.addLayout(cnn_row)
+        model_layout.addWidget(self.finetune_button)
         model_layout.addWidget(self.model_list, 1)
 
         center = QVBoxLayout()

@@ -106,11 +106,36 @@ class ModelPane:
         QMessageBox.information(self.window, "인식률", report["detail"])
         self._set_model_buttons(True)
 
+    def _finetune(self):
+        """목록에서 고른 딥러닝 모델을 새로 찍은 영상으로 이어서 학습하고, 새 모델로 적용합니다."""
+        if self.recorder.recording:
+            self.register_status.setText("녹화를 저장한 뒤 학습하세요.")
+            return
+        active = self.model_store.active()
+        base_id = active["id"] if active else None
+        self._set_model_buttons(False)
+        self.register_status.setText(f"{base_id} 파인튜닝 중... 새 영상의 손 좌표를 먼저 뽑습니다.")
+        QApplication.processEvents()
+        try:
+            record = self.model_store.finetune_motion(base_id)
+        except RuntimeError as exc:
+            self.register_status.setText(str(exc))
+            self._set_model_buttons(True)
+            return
+        self._apply_record(record)
+        self._reload_models()
+        self._reload_clips(select=self.clip_path)
+        self.register_status.setText(
+            f"{record['id']} 저장. {record['base']}에 새 영상 {record['new_video_count']}개를 더해 파인튜닝"
+        )
+        self._set_model_buttons(True)
+
     def _set_model_buttons(self, enabled):
         self.train_button.setEnabled(enabled)
         self.score_button.setEnabled(enabled)
         self.cnn_button.setEnabled(enabled)
         self.cnn_score_button.setEnabled(enabled)
+        self.finetune_button.setEnabled(enabled)
 
     def _reload_models(self):
         # 목록을 비우는 동안 선택 변경 신호가 인식을 바꾸지 않게 막는다.
@@ -124,7 +149,9 @@ class ModelPane:
         # 저장된 모델을 만든 순서대로 한 줄씩 넣는다.
         for record in self.model_store.list_models():
             # 보이는 글자는 모델 이름과 학습 영상 개수다.
-            if record.get("kind") == "motion":
+            if record.get("finetuned"):
+                extra = f" · 파인튜닝({record.get('base', '')})"
+            elif record.get("kind") == "motion":
                 extra = " · 딥러닝"
             elif record.get("kind") == "cnn1d":
                 extra = " · 1D CNN"

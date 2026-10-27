@@ -95,6 +95,53 @@ class ModelStore:
         thresholds = self._thresholds_for(tags)
         return self._save_motion(model, videos, tag_counts, thresholds, save_motion_model)
 
+    # 파인튜닝. 기반 모델의 학습 영상 목록에 없는 영상이 "새 영상"이다.
+    # 다른 컴퓨터에서 학습해 이 컴퓨터에 영상이 없어도, 기반 모델이 배운 것은 가중치에 남아 있다.
+    # 이 컴퓨터에 있는 예전 영상은 복습용으로 같이 넣는다.
+    def finetune_motion(self, base_id=None):
+        """고른 딥러닝 모델을 이 컴퓨터에서 새로 찍은 영상으로 이어서 학습하고, 새 모델로 저장합니다."""
+        try:
+            from gesture.model.sequence import finetune_motion_model, save_motion_model
+        except ImportError as exc:
+            raise RuntimeError("딥러닝에는 torch가 필요합니다.") from exc
+        base_record = self._record(base_id) if base_id else self.active()
+        if base_record is None or base_record.get("kind") != "motion":
+            raise RuntimeError("파인튜닝은 딥러닝 모델에서만 할 수 있습니다. 목록에서 딥러닝 모델을 고르세요.")
+        base, base_tags, _kind, _thresholds = self.load(base_record["id"])
+        folders = self._tagged_videos(include_photos=True)
+        if folders is None:
+            raise RuntimeError("저장된 영상이 없습니다. 먼저 태그를 골라 녹화하세요.")
+        learned = set(base_record.get("videos", []))
+
+        def relative(path):
+            return path.relative_to(self.settings.video_dir).as_posix()
+
+        new_paths = {path for _name, videos in folders for path in videos if relative(path) not in learned}
+        if not new_paths:
+            raise RuntimeError(f"{base_record['id']} 이후 새로 찍은 영상이 없습니다. 먼저 녹화하세요.")
+        # 기반 모델 태그 순서를 그대로 두고, 새로 생긴 태그만 뒤에 붙인다.
+        tags = list(base_tags)
+        for name, videos in folders:
+            if name not in tags and any(path in new_paths for path in videos):
+                tags.append(name)
+        clips, tags, videos, tag_counts = self._motion_clips(folders, tags=tags)
+        fresh = [clip[5] in new_paths for clip in clips]
+        if not any(fresh):
+            raise RuntimeError("새로 찍은 영상에서 손을 찾지 못했습니다. 중앙 박스 안에서 다시 녹화하세요.")
+        model = finetune_motion_model(base, [clip[:5] for clip in clips], fresh, tags, self.settings)
+        thresholds = self._thresholds_for(tags)
+        new_videos = sorted({relative(path) for path in new_paths if relative(path) in set(videos)})
+        all_videos = list(base_record.get("videos", [])) + new_videos
+        counts = dict(base_record.get("tag_counts", {}))
+        for path in new_videos:
+            name = path.split("/", 1)[0]
+            counts[name] = counts.get(name, 0) + 1
+        extra = {"base": base_record["id"], "finetuned": True, "new_video_count": len(new_videos)}
+        return self._save_motion(model, all_videos, counts, thresholds, save_motion_model, extra)
+
+    def _record(self, model_id):
+        return next((item for item in self.list_models() if item["id"] == model_id), None)
+
     def evaluate(self):
         """태그마다 영상의 20%를 빼고 맞힌 비율을 계산합니다. 모델은 저장하지 않습니다."""
         train_groups, test_groups, skipped = self._split_folders()
@@ -459,7 +506,7 @@ class ModelStore:
         self._write_catalog(catalog)
         return record
 
-    def _save_motion(self, model, videos, tag_counts, thresholds, save_model):
+    def _save_motion(self, model, videos, tag_counts, thresholds, save_model, extra=None):
         self.directory.mkdir(parents=True, exist_ok=True)
         catalog = self._read_catalog()
         model_id = self._next_id(catalog)
@@ -476,6 +523,8 @@ class ModelStore:
             "augmented": True,
             "thresholds": thresholds,
         }
+        # 파인튜닝이면 기반 모델 이름과 새 영상 수를 같이 적는다.
+        record.update(extra or {})
         catalog["models"].append(record)
         catalog["active"] = model_id
         self._write_catalog(catalog)
