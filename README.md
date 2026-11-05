@@ -96,40 +96,73 @@ data/palm/p1_palm_0001.png
 
 ## 실행
 
-파이썬 3.14 콘다 환경을 받은 상태에서의 순서입니다. Windows는 Anaconda Prompt, macOS·Linux는 터미널에서 진행합니다.
+파이썬 **3.12** 환경에서 실행합니다. MediaPipe 0.10.18이 이 버전에 맞습니다. Windows는 Anaconda Prompt, macOS는 터미널을 씁니다.
 
-1. 받은 환경을 켭니다. `환경이름`은 전달받은 이름으로 바꿉니다.
+### 1. 환경
+
+이미 받은 콘다 환경이 있으면 그 이름을 켭니다.
 
 ```text
 conda activate 환경이름
 python --version
 ```
 
-`Python 3.14`로 나오면 다음으로 넘어갑니다.
+`Python 3.12.x`가 아니면, 프로젝트 폴더에서 환경을 새로 만듭니다.
 
-2. 이 저장소를 받은 프로젝트 폴더로 이동합니다. 아래 경로는 예시이고, 실제 받은 위치로 바꿉니다.
+```text
+conda create -n gesture python=3.12
+conda activate gesture
+```
+
+### 2. 프로젝트 폴더로 이동
+
+아래 경로는 예시입니다. 저장소를 받은 실제 위치로 바꿉니다.
 
 ```text
 cd C:\Users\user1\soo\project\gesture
 ```
 
-3. 라이브러리를 설치합니다. `requirements.txt`에 있는 것은 다섯 가지입니다.
+### 3. 라이브러리 설치
 
-- `opencv-python`: 웹캠, PNG 저장·읽기, 피부색 마스크와 손 윤곽. 코드에서는 `cv2`로 부릅니다.
-- `numpy`: 특징 숫자 배열
-- `scikit-learn`: 스케일러와 랜덤포레스트
-- `joblib`: `models/gesture.joblib` 저장과 불러오기
-- `PySide6`: 창과 탭. Qt의 공식 파이썬 라이브러리입니다.
+`requirements.txt`에 있는 패키지는 아래 일곱 가지입니다. 코드에서 직접 불러오는 외부 라이브러리는 이것뿐입니다.
+
+| 패키지 | 코드에서 쓰는 이름 | 하는 일 |
+| --- | --- | --- |
+| opencv-python | `cv2` | 웹캠, 영상 저장·재생, 화면 그리기 |
+| mediapipe | `mediapipe` | 손 관절 21개 좌표 |
+| numpy | `numpy` | 좌표와 특징 숫자 |
+| scikit-learn | `sklearn` | 랜덤포레스트 학습 |
+| joblib | `joblib` | 랜덤포레스트 모델 파일 저장 |
+| PySide6 | `PySide6` | 등록·인식 창 |
+| torch | `torch` | 딥러닝(1D CNN + GRU) 학습과 인식 |
 
 ```text
 python -m pip install -r requirements.txt
 ```
 
-4. 실행 파일이 있는 `src`로 이동한 뒤 창을 엽니다. `main.py`가 같은 폴더의 `gesture` 패키지를 불러오므로, 이 명령은 `src` 안에서 실행합니다.
+### 4. 창 실행
+
+`main.py`는 같은 폴더의 `gesture` 패키지를 불러옵니다. 반드시 `src` 안에서 실행합니다.
 
 ```text
 cd src
 python main.py
 ```
 
-창 하나가 열리고 등록 탭이 먼저 나옵니다. 녹화, 저장, 학습은 그 창에서 합니다. Space로 녹화와 저장을 전환하고, 방향키로 태그를 이동합니다. 카메라 번호는 `python main.py --camera 1`처럼 바꿉니다. 창을 닫으면 종료되고, 녹화 중이었다면 그때까지 찍은 영상을 저장합니다.
+카메라가 두 개 이상이면 번호를 지정합니다. 기본값은 0입니다.
+
+```text
+python main.py --camera 1
+```
+
+창을 닫으면 끝납니다. 녹화 중이었다면 그때까지 찍은 영상을 저장합니다.
+
+### 5. 창에서 하는 일
+
+창은 하나이고, 처음 화면은 **등록** 탭입니다.
+
+1. 오른쪽에서 태그를 고릅니다. 좌우 방향키로도 이동합니다.
+2. 손을 화면 중앙에 두고 `녹화`를 누르거나 Space를 누릅니다. 다시 Space를 누르거나 `정지(저장)`를 누르면 `data/videos/태그/`에 영상이 저장됩니다.
+3. 태그에 영상이 쌓이면 `학습`으로 랜덤포레스트를 만들거나, `딥러닝 학습`으로 1D CNN + GRU 모델을 만듭니다. 파일은 `models/`에 생깁니다.
+4. 모델 목록에서 사용할 모델을 고른 뒤 **인식** 탭으로 이동합니다. 웹캠 화면에 손 판정이 나옵니다.
+5. `실제 동작`을 켜면 인식된 동작이 마우스·브라우저 명령으로 나갑니다. macOS는 시스템 설정의 손쉬운 사용 권한이 있어야 커서가 움직입니다.
