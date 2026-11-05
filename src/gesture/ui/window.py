@@ -106,6 +106,8 @@ class GestureWindow(TagPane, ModelPane, ClipPane, CameraPane):
         self.live_button.toggled.connect(self._toggle_live)
         self.recognize_image = self._video_label()
         self.recognize_status = QLabel("제스처: -")
+        # 스크린샷 저장 경로처럼 긴 문구는 줄을 바꿔 보여 준다.
+        self.recognize_status.setWordWrap(True)
         left.addWidget(self.live_button)
         left.addWidget(self.recognize_image, 1)
         left.addWidget(self.recognize_status)

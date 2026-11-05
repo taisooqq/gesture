@@ -1,5 +1,6 @@
 """웹캠 프레임을 보여주고, 녹화 중이면 중앙 영역만 저장합니다."""
 
+import os
 import time
 from collections import deque
 
@@ -55,7 +56,10 @@ class CameraPane:
         self._aim(frame, box, label)
         state = self._control(label)
         self._track_log(label, state)
-        if getattr(self, "_predict_note", None):
+        self._check_screenshot()
+        if time.perf_counter() < getattr(self, "_shot_notice_until", 0.0):
+            text = self._shot_notice
+        elif getattr(self, "_predict_note", None):
             text = self._predict_note
         elif self.model is None and label == "none":
             text = "제스처: 모델 없음"
@@ -469,6 +473,29 @@ class CameraPane:
         if pointer.left_down():
             self._click_held = True
             self._control_note = None
+
+    # 스크린샷은 따로 돌아서 저장이 조금 늦게 끝난다. 끝나면 그 결과를 여기서 받는다.
+    def _check_screenshot(self):
+        """스크린샷이 저장됐으면 저장 위치를 몇 초 동안 화면 아래와 동작 기록에 띄웁니다."""
+        result = pointer.take_screenshot_result()
+        if result is None:
+            return
+        path, folder = result
+        if path:
+            notice = f"스크린샷을 했습니다 · 저장 위치: {path}"
+            line = f"스크린샷 저장: {os.path.basename(path)}"
+        elif folder:
+            notice = f"스크린샷을 했습니다 · 저장 폴더: {folder}"
+            line = "스크린샷 저장 (파일 확인 못함)"
+        else:
+            notice = "스크린샷을 보냈지만 저장 위치를 찾지 못했습니다"
+            line = "스크린샷 저장 위치 모름"
+        # 긴 경로도 \ 나 / 뒤에서 줄이 바뀌게 한다. 그대로 두면 창이 옆으로 늘어난다.
+        self._shot_notice = notice.replace("\\", "\\​").replace("/", "/​")
+        self._shot_notice_until = time.perf_counter() + self.settings.screenshot_notice_seconds
+        item = QListWidgetItem(f"{time.strftime('%H:%M:%S')}  {line}")
+        item.setToolTip(path or folder or "")
+        self.gesture_log.insertItem(0, item)
 
     def _release_click(self):
         if getattr(self, "_click_held", False):

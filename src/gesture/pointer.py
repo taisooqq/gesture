@@ -11,6 +11,9 @@ _left_held = False
 _browser_lock = threading.Lock()
 _drive_lock = threading.Lock()
 _drive_enabled = False
+# 스크린샷이 끝나면 (저장된 파일, 저장 폴더)를 여기 둔다. 화면이 take_screenshot_result 로 가져간다.
+_shot_lock = threading.Lock()
+_shot_result = None
 
 
 if sys.platform == "darwin":
@@ -129,6 +132,7 @@ if sys.platform == "darwin":
         stamp = time.strftime("%Y-%m-%d %H.%M.%S")
         path = os.path.join(folder, f"Screen Shot {stamp}.png")
         subprocess.run(["screencapture", "-m", path], check=False, timeout=8)
+        return (path if os.path.exists(path) else None), folder
 
     _BROWSER_SCRIPT = r'''
 on run argv
@@ -168,10 +172,19 @@ end run
 
 elif sys.platform == "win32":
     import ctypes
+    import uuid
     from ctypes import wintypes
 
     _user32 = ctypes.WinDLL("user32", use_last_error=True)
     _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _shell32 = ctypes.WinDLL("shell32")
+    _ole32 = ctypes.WinDLL("ole32")
+    # Win+PrintScreen 이 저장하는 '스크린샷' 폴더의 윈도우 고유 번호(FOLDERID_Screenshots).
+    # 폴더를 OneDrive 등으로 옮겨도 윈도우가 실제 위치를 알려 준다.
+    _SCREENSHOTS_ID = uuid.UUID("b7bede81-df94-4682-a7d8-57a52620b86f")
+    # 폴더가 아직 없어도 경로를 돌려받는다(KF_FLAG_DONT_VERIFY).
+    _KF_DONT_VERIFY = 0x4000
+    _IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg")
 
     _INPUT_MOUSE = 0
     _INPUT_KEYBOARD = 1
@@ -287,6 +300,24 @@ elif sys.platform == "win32":
         ctypes.POINTER(wintypes.DWORD),
     ]
     _kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+
+    class _GUID(ctypes.Structure):
+        _fields_ = [
+            ("Data1", wintypes.DWORD),
+            ("Data2", wintypes.WORD),
+            ("Data3", wintypes.WORD),
+            ("Data4", ctypes.c_ubyte * 8),
+        ]
+
+    _shell32.SHGetKnownFolderPath.argtypes = [
+        ctypes.POINTER(_GUID),
+        wintypes.DWORD,
+        wintypes.HANDLE,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    _shell32.SHGetKnownFolderPath.restype = ctypes.c_long
+    _ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+    _ole32.CoTaskMemFree.restype = None
 
     def _trusted():
         # 윈도우는 손쉬운 사용 권한 없이 마우스 입력을 보낼 수 있다.
@@ -410,13 +441,55 @@ elif sys.platform == "win32":
         _tap(key, True)
         _tap(modifier, True)
 
+    def _screenshot_folder():
+        """Win+PrintScreen 이 그림을 저장하는 폴더를 윈도우에 물어봅니다."""
+        guid = _GUID.from_buffer_copy(_SCREENSHOTS_ID.bytes_le)
+        raw = ctypes.c_void_p()
+        result = _shell32.SHGetKnownFolderPath(
+            ctypes.byref(guid), _KF_DONT_VERIFY, None, ctypes.byref(raw)
+        )
+        try:
+            if result == 0 and raw.value:
+                return ctypes.wstring_at(raw.value)
+        finally:
+            if raw.value:
+                _ole32.CoTaskMemFree(raw)
+        return os.path.join(os.path.expanduser("~"), "Pictures", "Screenshots")
+
+    def _images_in(folder):
+        """폴더 안 그림 파일 이름들. 폴더가 없으면 빈 묶음입니다."""
+        try:
+            return {
+                name for name in os.listdir(folder) if name.lower().endswith(_IMAGE_EXTENSIONS)
+            }
+        except OSError:
+            return set()
+
+    def _modified(path):
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return 0.0
+
     def _send_screenshot():
         # Win+PrintScreen. 전체 화면을 그림 파일로 저장한다.
+        # 키를 보내기 전 파일 목록과 비교해서, 새로 생긴 파일을 저장된 스크린샷으로 본다.
+        folder = _screenshot_folder()
+        before = _images_in(folder)
         _tap(0x5B, False)
         _tap(0x2C, False)
         time.sleep(0.02)
         _tap(0x2C, True)
         _tap(0x5B, True)
+        # 윈도우가 파일을 쓰는 데 시간이 조금 걸린다. 최대 3초 동안 새 파일을 찾는다.
+        deadline = time.monotonic() + 3.0
+        while time.monotonic() < deadline:
+            time.sleep(0.15)
+            fresh = _images_in(folder) - before
+            if fresh:
+                paths = [os.path.join(folder, name) for name in fresh]
+                return max(paths, key=_modified), folder
+        return None, folder
 
 else:
 
@@ -442,7 +515,7 @@ else:
         return None
 
     def _send_screenshot():
-        return None
+        return None, None
 
 
 def trusted():
@@ -537,13 +610,34 @@ def screenshot():
         return True
 
     def run():
+        path, folder = None, None
         try:
-            _send_screenshot()
+            path, folder = _send_screenshot()
+        except (OSError, subprocess.SubprocessError):
+            pass
         finally:
             _browser_lock.release()
+        _store_screenshot(path, folder)
 
     threading.Thread(target=run, daemon=True).start()
     return True
+
+
+def _store_screenshot(path, folder):
+    global _shot_result
+    with _shot_lock:
+        _shot_result = (path, folder)
+
+
+def take_screenshot_result():
+    """끝난 스크린샷의 (저장된 파일, 저장 폴더)를 한 번만 돌려줍니다. 아직이면 None 입니다.
+
+    파일을 찾지 못하면 파일 자리는 None 이고, 폴더만 있습니다.
+    """
+    global _shot_result
+    with _shot_lock:
+        result, _shot_result = _shot_result, None
+    return result
 
 
 def browser(action):
